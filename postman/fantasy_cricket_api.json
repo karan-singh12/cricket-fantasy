@@ -1,0 +1,500 @@
+{
+	"info": {
+		"_postman_id": "fantasy-cricket-api",
+		"name": "Fantasy Cricket API",
+		"description": "Complete API collection for Fantasy Cricket application",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"description": "Authentication endpoints",
+			"item": [
+				{
+					"name": "User Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"user@example.com\",\n    \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/user/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "user", "auth", "login"]
+						},
+						"description": "Login for regular users"
+					}
+				},
+				{
+					"name": "User Register",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"John Doe\",\n    \"email\": \"user@example.com\",\n    \"password\": \"password123\",\n    \"confirm_password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/user/auth/register",
+							"host": ["{{base_url}}"],
+							"path": ["api", "user", "auth", "register"]
+						},
+						"description": "Register new user"
+					}
+				},
+				{
+					"name": "Admin Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@fantasycricket.com\",\n    \"password\": \"admin123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/admin/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "auth", "login"]
+						},
+						"description": "Login for admin users"
+					}
+				}
+			]
+		},
+		{
+			"name": "Tournaments",
+			"description": "Tournament management endpoints",
+			"item": [
+				{
+					"name": "Get All Tournaments",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/tournaments",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tournaments"]
+						},
+						"description": "Retrieve all tournaments"
+					}
+				},
+				{
+					"name": "Get Tournament by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/tournaments/:id",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tournaments", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Tournament ID"
+								}
+							]
+						},
+						"description": "Retrieve a specific tournament by ID"
+					}
+				},
+				{
+					"name": "Create Tournament",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"IPL 2024\",\n    \"season\": \"2024\",\n    \"start_date\": \"2024-03-22\",\n    \"end_date\": \"2024-05-26\",\n    \"status\": \"upcoming\",\n    \"category\": \"T20\",\n    \"metadata\": {\n        \"format\": \"T20\",\n        \"teams\": 10,\n        \"matches\": 74\n    }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/tournaments",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tournaments"]
+						},
+						"description": "Create a new tournament"
+					}
+				},
+				{
+					"name": "Update Tournament",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"IPL 2024\",\n    \"season\": \"2024\",\n    \"start_date\": \"2024-03-22\",\n    \"end_date\": \"2024-05-26\",\n    \"status\": \"active\",\n    \"category\": \"T20\",\n    \"metadata\": {\n        \"format\": \"T20\",\n        \"teams\": 10,\n        \"matches\": 74,\n        \"current_stage\": \"group_stage\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/tournaments/:id",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tournaments", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Tournament ID"
+								}
+							]
+						},
+						"description": "Update an existing tournament"
+					}
+				},
+				{
+					"name": "Delete Tournament",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/tournaments/:id",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tournaments", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Tournament ID"
+								}
+							]
+						},
+						"description": "Delete a tournament"
+					}
+				},
+				{
+					"name": "Sync Tournaments",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/tournaments/sync",
+							"host": ["{{base_url}}"],
+							"path": ["api", "tournaments", "sync"]
+						},
+						"description": "Sync tournaments from Goalserve API"
+					}
+				}
+			]
+		},
+		{
+			"name": "Cricket",
+			"description": "Cricket data endpoints",
+			"item": [
+				{
+					"name": "Get Matches",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/cricket/matches",
+							"host": ["{{base_url}}"],
+							"path": ["api", "cricket", "matches"]
+						},
+						"description": "Get all cricket matches"
+					}
+				},
+				{
+					"name": "Get Match by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/cricket/matches/:id",
+							"host": ["{{base_url}}"],
+							"path": ["api", "cricket", "matches", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Match ID"
+								}
+							]
+						},
+						"description": "Get specific match details"
+					}
+				},
+				{
+					"name": "Get Teams",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/cricket/teams",
+							"host": ["{{base_url}}"],
+							"path": ["api", "cricket", "teams"]
+						},
+						"description": "Get all cricket teams"
+					}
+				},
+				{
+					"name": "Get Players",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/cricket/players",
+							"host": ["{{base_url}}"],
+							"path": ["api", "cricket", "players"]
+						},
+						"description": "Get all cricket players"
+					}
+				},
+				{
+					"name": "Sync Matches",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/cricket/matches/sync",
+							"host": ["{{base_url}}"],
+							"path": ["api", "cricket", "matches", "sync"]
+						},
+						"description": "Sync matches from Goalserve API"
+					}
+				}
+			]
+		},
+		{
+			"name": "Contests",
+			"description": "Contest management endpoints",
+			"item": [
+				{
+					"name": "Get All Contests",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/contests",
+							"host": ["{{base_url}}"],
+							"path": ["api", "contests"]
+						},
+						"description": "Get all contests"
+					}
+				},
+				{
+					"name": "Create Contest",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"IPL Mega Contest\",\n    \"entry_fee\": 100,\n    \"prize_pool\": 10000,\n    \"max_entries\": 100,\n    \"match_id\": 1,\n    \"start_time\": \"2024-03-22T19:30:00Z\",\n    \"end_time\": \"2024-03-22T23:30:00Z\",\n    \"status\": \"upcoming\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/contests",
+							"host": ["{{base_url}}"],
+							"path": ["api", "contests"]
+						},
+						"description": "Create a new contest"
+					}
+				},
+				{
+					"name": "Join Contest",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/contests/:id/join",
+							"host": ["{{base_url}}"],
+							"path": ["api", "contests", ":id", "join"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Contest ID"
+								}
+							]
+						},
+						"description": "Join a contest"
+					}
+				}
+			]
+		},
+		{
+			"name": "Fantasy Points",
+			"description": "Fantasy points management endpoints",
+			"item": [
+				{
+					"name": "Get Leaderboard",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/fantasy-points/leaderboard",
+							"host": ["{{base_url}}"],
+							"path": ["api", "fantasy-points", "leaderboard"]
+						},
+						"description": "Get fantasy points leaderboard"
+					}
+				},
+				{
+					"name": "Get User Points",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/fantasy-points/user/:userId",
+							"host": ["{{base_url}}"],
+							"path": ["api", "fantasy-points", "user", ":userId"],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "1",
+									"description": "User ID"
+								}
+							]
+						},
+						"description": "Get fantasy points for a specific user"
+					}
+				}
+			]
+		},
+		{
+			"name": "Admin",
+			"description": "Admin management endpoints",
+			"item": [
+				{
+					"name": "Get All Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/users",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "users"]
+						},
+						"description": "Get all users (admin only)"
+					}
+				},
+				{
+					"name": "Manage Match",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"status\": \"completed\",\n    \"winner_team_id\": 1,\n    \"scores\": {\n        \"team1\": 180,\n        \"team2\": 175\n    }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/admin/matches/:id",
+							"host": ["{{base_url}}"],
+							"path": ["api", "admin", "matches", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Match ID"
+								}
+							]
+						},
+						"description": "Update match details (admin only)"
+					}
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [""]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [""]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "your_jwt_token_here",
+			"type": "string"
+		}
+	]
+} 

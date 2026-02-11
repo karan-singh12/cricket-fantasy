@@ -1,0 +1,13 @@
+
+
+# Environment variables
+.env
+.env.live
+
+# Node modules
+node_modules
+
+services/firebase.json 
+
+/public
+services/firebase.json 

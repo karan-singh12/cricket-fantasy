@@ -1,0 +1,953 @@
+{
+  "info": {
+    "name": "MyBest11 Admin API Collection",
+    "description": "Complete Postman collection for MyBest11 Fantasy Cricket Platform Admin APIs",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{admin_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000/api",
+      "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Admin Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Admin Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Super Admin\",\n  \"email\": \"admin@example.com\",\n  \"password\": \"password123\",\n  \"role\": \"super_admin\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "Get Admin Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/auth/profile",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "auth", "profile"]
+            }
+          }
+        },
+        {
+          "name": "Update Admin Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Admin Name\",\n  \"email\": \"updated@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/auth/profile",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "auth", "profile"]
+            }
+          }
+        },
+        {
+          "name": "Admin Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "auth", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "User Management",
+      "item": [
+        {
+          "name": "Get All Users",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"page\": 1,\n  \"limit\": 10,\n  \"search\": \"\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/user/getAllUser",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "user", "getAllUser"]
+            }
+          }
+        },
+        {
+          "name": "Get User by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/user/getOneUser/1",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "user", "getOneUser", "1"]
+            }
+          }
+        },
+        {
+          "name": "Add New User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"phone\": \"+1234567890\",\n  \"password\": \"password123\",\n  \"dob\": \"1990-01-01\",\n  \"gender\": \"male\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/user/addUser",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "user", "addUser"]
+            }
+          }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "id",
+                  "value": "1",
+                  "type": "text"
+                },
+                {
+                  "key": "name",
+                  "value": "Updated Name",
+                  "type": "text"
+                },
+                {
+                  "key": "email",
+                  "value": "updated@example.com",
+                  "type": "text"
+                },
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/user/updateUser",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "user", "updateUser"]
+            }
+          }
+        },
+        {
+          "name": "Change User Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 1,\n  \"status\": \"inactive\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/user/changeStatus",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "user", "changeStatus"]
+            }
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/user/deleteUser",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "user", "deleteUser"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Player Management",
+      "item": [
+        {
+          "name": "Get All Players",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/players/players",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "players", "players"]
+            }
+          }
+        },
+        {
+          "name": "Create Player",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Virat Kohli\",\n  \"role\": \"batsman\",\n  \"team_id\": 1,\n  \"batting_style\": \"right_hand\",\n  \"bowling_style\": \"right_arm_medium\",\n  \"points\": 850,\n  \"credits\": 10.5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/players/players",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "players", "players"]
+            }
+          }
+        },
+        {
+          "name": "Update Player",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Player Name\",\n  \"role\": \"all_rounder\",\n  \"team_id\": 2,\n  \"points\": 900,\n  \"credits\": 11.0\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/players/players/1",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "players", "players", "1"]
+            }
+          }
+        },
+        {
+          "name": "Delete Player",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/players/players/1",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "players", "players", "1"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contest Management",
+      "item": [
+        {
+          "name": "Get All Contests",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"page\": 1,\n  \"limit\": 10,\n  \"search\": \"\",\n  \"status\": \"upcoming\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/contests/getAllContests",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "contests", "getAllContests"]
+            }
+          }
+        },
+        {
+          "name": "Create Contest",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"IPL Mega Contest\",\n  \"tournament_id\": 1,\n  \"match_id\": 1,\n  \"entry_fee\": 50,\n  \"total_spots\": 100,\n  \"prize_pool\": {\n    \"total\": 5000,\n    \"breakup\": [\n      {\"rank\": 1, \"amount\": 2000},\n      {\"rank\": 2, \"amount\": 1000},\n      {\"rank\": 3, \"amount\": 500}\n    ]\n  },\n  \"start_time\": \"2024-03-25T15:00:00Z\",\n  \"end_time\": \"2024-03-25T19:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/contests/createContest",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "contests", "createContest"]
+            }
+          }
+        },
+        {
+          "name": "Update Contest",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 1,\n  \"name\": \"Updated Contest Name\",\n  \"entry_fee\": 75,\n  \"total_spots\": 150\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/contests/updateContest",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "contests", "updateContest"]
+            }
+          }
+        },
+        {
+          "name": "Delete Contest",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/contests/deleteContest",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "contests", "deleteContest"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tournament Management",
+      "item": [
+        {
+          "name": "Get All Tournaments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/tournaments",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "tournaments"]
+            }
+          }
+        },
+        {
+          "name": "Create Tournament",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"IPL 2024\",\n  \"season\": \"2024\",\n  \"start_date\": \"2024-03-22\",\n  \"end_date\": \"2024-05-26\",\n  \"category\": \"cricket\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/tournaments",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "tournaments"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Match Management",
+      "item": [
+        {
+          "name": "Get All Matches",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/matches",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "matches"]
+            }
+          }
+        },
+        {
+          "name": "Create Match",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tournament_id\": 1,\n  \"team1_id\": 1,\n  \"team2_id\": 2,\n  \"venue\": \"Wankhede Stadium\",\n  \"start_time\": \"2024-03-25T15:00:00Z\",\n  \"match_type\": \"T20\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/matches",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "matches"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Content Management",
+      "item": [
+        {
+          "name": "Get All CMS Pages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/cms",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "cms"]
+            }
+          }
+        },
+        {
+          "name": "Create CMS Page",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"About Us\",\n  \"content\": \"This is the about us page content...\",\n  \"slug\": \"about-us\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/cms",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "cms"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "FAQ Management",
+      "item": [
+        {
+          "name": "Get All FAQs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/faq",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "faq"]
+            }
+          }
+        },
+        {
+          "name": "Create FAQ",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"How to create a fantasy team?\",\n  \"answer\": \"Follow these steps to create your fantasy team...\",\n  \"category\": \"general\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/faq",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "faq"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Banner Management",
+      "item": [
+        {
+          "name": "Get All Banners",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/banner",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "banner"]
+            }
+          }
+        },
+        {
+          "name": "Upload Banner",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{admin_token}}"
+                }
+              ],
+              "body": {
+                "mode": "formdata",
+                "formdata": [
+                  {
+                    "key": "title",
+                    "value": "IPL 2024 Banner",
+                    "type": "text"
+                  },
+                  {
+                    "key": "link_url",
+                    "value": "https://example.com/ipl",
+                    "type": "text"
+                  },
+                  {
+                    "key": "position",
+                    "value": "1",
+                    "type": "text"
+                  },
+                  {
+                    "key": "image",
+                    "type": "file",
+                    "src": []
+                  }
+                ]
+              },
+              "url": {
+                "raw": "{{base_url}}/admin/banner",
+                "host": ["{{base_url}}"],
+                "path": ["admin", "banner"]
+              }
+            }
+        }
+      ]
+    },
+    {
+      "name": "Support Management",
+      "item": [
+        {
+          "name": "Get All Support Tickets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/support",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "support"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notification Management",
+      "item": [
+        {
+          "name": "Get All Notifications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/notifications",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "notifications"]
+            }
+          }
+        },
+        {
+          "name": "Send Notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Welcome Offer\",\n  \"message\": \"Get 100% bonus on your first deposit!\",\n  \"user_ids\": [1, 2, 3],\n  \"type\": \"promotional\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/notifications",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "notifications"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sub-admin Management",
+      "item": [
+        {
+          "name": "Get All Sub-admins",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/subadmin",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "subadmin"]
+            }
+          }
+        },
+        {
+          "name": "Create Sub-admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sub Admin\",\n  \"email\": \"subadmin@example.com\",\n  \"password\": \"password123\",\n  \"role\": \"moderator\",\n  \"permissions\": {\n    \"users\": [\"read\", \"update\"],\n    \"contests\": [\"read\"]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/subadmin",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "subadmin"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Email Template Management",
+      "item": [
+        {
+          "name": "Get All Email Templates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/emailTemplate",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "emailTemplate"]
+            }
+          }
+        },
+        {
+          "name": "Create Email Template",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Welcome Email\",\n  \"subject\": \"Welcome to MyBest11\",\n  \"body\": \"Dear {{name}}, Welcome to MyBest11...\",\n  \"variables\": [\"name\", \"email\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/emailTemplate",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "emailTemplate"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "SportMonks Integration",
+      "item": [
+        {
+          "name": "Sync Teams",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/sportmonks/sync-teams",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "sportmonks", "sync-teams"]
+            }
+          }
+        },
+        {
+          "name": "Sync Matches",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/sportmonks/sync-matches",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "sportmonks", "sync-matches"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
