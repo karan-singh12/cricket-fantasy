@@ -1,7 +1,8 @@
-const { knex: db } = require("../../config/database");
+const User = require("../../models/User");
+const Notification = require("../../models/Notification");
 const apiResponse = require("../../utils/apiResponse");
 const { sendPushNotificationFCM } = require("../../utils/functions");
-const { ERROR, SUCCESS, NOTIFICATION } = require("../../utils/responseMsg");
+const { ERROR, NOTIFICATION } = require("../../utils/responseMsg");
 
 const NotificationController = {
 
@@ -22,46 +23,45 @@ const NotificationController = {
           NOTIFICATION.titleAndContentRequired
         );
       }
-      const users = await db("users")
-        .whereIn("id", user_ids)
-        .select("id", "ftoken");
+      const users = await User.find({ _id: { $in: user_ids } })
+        .select("ftoken");
 
       const notifications = [];
-      const fcmResults = { sent: 0, failed: 0, invalidTokens: 0 };
+      // const fcmResults = { sent: 0, failed: 0, invalidTokens: 0 }; // Not used in response but kept for logic
 
       for (const user of users) {
         notifications.push({
-          user_id: user.id,
+          user: user._id,
           title,
           content,
           is_read: false,
-          sent_at: db.fn.now(),
-          created_at: db.fn.now(),
+          sent_at: new Date(),
         });
 
         if (user.ftoken) {
           try {
             await sendPushNotificationFCM(user.ftoken, title, content);
-            fcmResults.sent += 1;
-            console.log(`FCM notification sent to user ${user.id}`);
+            // fcmResults.sent += 1;
+            console.log(`FCM notification sent to user ${user._id}`);
           } catch (error) {
-            fcmResults.failed += 1;
+            // fcmResults.failed += 1;
             if (error.code === "messaging/registration-token-not-registered") {
-              fcmResults.invalidTokens += 1;
+              // fcmResults.invalidTokens += 1;
+              await User.findByIdAndUpdate(user._id, { ftoken: null });
             }
             console.log(
-              `Failed to send FCM to user ${user.id}: ${error.message}`
+              `Failed to send FCM to user ${user._id}: ${error.message}`
             );
           }
         } else {
           console.log(
-            `No ftoken for user ${user.id}, skipping FCM notification`
+            `No ftoken for user ${user._id}, skipping FCM notification`
           );
         }
       }
 
       if (notifications.length > 0) {
-        await db("notifications").insert(notifications);
+        await Notification.insertMany(notifications);
       }
 
       return apiResponse.successResponseWithData(

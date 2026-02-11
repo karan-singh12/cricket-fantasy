@@ -1,7 +1,9 @@
-const { knex: db } = require("../../config/database");
-const config = require("../../config/config");
+const mongoose = require("mongoose");
+const User = require("../../models/User");
+const Wallet = require("../../models/Wallet");
+const Notification = require("../../models/Notification");
 const apiResponse = require("../../utils/apiResponse");
-const { slugGenrator, generateReferralCode } = require("../../utils/functions");
+const { generateReferralCode } = require("../../utils/functions");
 const { USER, ERROR, SUCCESS, ADMIN } = require("../../utils/responseMsg");
 
 const userController = {
@@ -12,42 +14,45 @@ const userController = {
         email,
         phone,
         dob,
-        referral_code,
         metadata = {},
+        isBot = false,
       } = req.body;
 
       if (email) {
-        const emailExists = await db("users").where("email", email).first();
-
+        const emailExists = await User.findOne({ email });
         if (emailExists) {
           return apiResponse.ErrorResponse(res, ADMIN.emailExists);
         }
       }
 
       if (phone) {
-        const phoneExists = await db("users")
-          .where("phone", phone)
-
-          .first();
-
+        const phoneExists = await User.findOne({ phone });
         if (phoneExists) {
           return apiResponse.ErrorResponse(res, USER.phoneExists);
         }
       }
 
-      const [newUser] = await db("users")
-        .insert({
-          name,
-          email,
-          phone,
-          dob,
-          metadata,
-          status: 1,
-          isBot: isBot,
-          created_at: db.fn.now(),
-          updated_at: db.fn.now(),
-        })
-        .returning("*");
+      const newUser = new User({
+        name,
+        email,
+        phone,
+        dob,
+        metadata,
+        status: 1,
+        is_bot: isBot,
+      });
+
+      await newUser.save();
+
+      // Initialize wallet for the new user if not bot
+      if (!isBot) {
+        const newWallet = new Wallet({
+          user: newUser._id,
+          balance: 0,
+        });
+        await newWallet.save();
+      }
+
       return apiResponse.successResponseWithData(res, USER.userAdded, newUser);
     } catch (error) {
       console.error(error);
@@ -66,96 +71,45 @@ const userController = {
         status = [],
       } = req.body;
 
-      let query = db("users").whereNot("status", 2).andWhere("is_bot", false);
+      const filter = { status: { $ne: 2 }, is_bot: false };
 
-      // Filter by status if provided
       if (status.length > 0) {
-        query.andWhere((qb) => qb.whereIn("status", status));
+        filter.status = { $in: status };
       }
 
-      // Search functionality
       if (searchItem) {
-        query.andWhere((builder) =>
-          builder
-            .whereILike("name", `%${searchItem}%`)
-            .orWhereILike("email", `%${searchItem}%`)
-            .orWhereILike("phone", `%${searchItem}%`)
-        );
+        filter.$or = [
+          { name: { $regex: searchItem, $options: "i" } },
+          { email: { $regex: searchItem, $options: "i" } },
+          { phone: { $regex: searchItem, $options: "i" } },
+        ];
       }
 
-      // Check if pagination parameters are provided
       const shouldPaginate = pageSize !== undefined && pageNumber !== undefined;
 
       if (shouldPaginate) {
-        // Handle pagination
         pageSize = parseInt(pageSize) || 10;
         pageNumber = parseInt(pageNumber) || 1;
-        const pageOffset = Math.max(0, pageNumber - 1);
+        const skip = (pageNumber - 1) * pageSize;
 
-        // Get total count
-        const totalRecords = await query.clone().count().first();
-
-        // Get paginated results
-        const result = await query
-          .select(
-            "id",
-            "name",
-            "email",
-            "phone",
-            "status",
-            "dob",
-            "is_verified",
-            "is_name_setup",
-            "referral_code",
-            "referred_by",
-            "social_login_type",
-            "fb_id",
-            "google_id",
-            "apple_id",
-            "is_bot",
-            "device_id",
-            "device_type",
-            "metadata",
-            "created_at",
-            "referral_bonus"
-          )
-          .orderBy(sortBy, sortOrder)
+        const totalRecords = await User.countDocuments(filter);
+        const result = await User.find(filter)
+          .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
+          .skip(skip)
           .limit(pageSize)
-          .offset(pageSize * pageOffset);
+          .lean();
 
         return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
           result,
-          totalRecords: parseInt(totalRecords.count),
-          pageNumber: pageNumber,
+          totalRecords,
+          pageNumber,
           pageSize,
           paginated: true,
         });
       } else {
-        // Return all records when no pagination parameters are provided
-        const result = await query
-          .select(
-            "id",
-            "name",
-            "email",
-            "phone",
-            "status",
-            "dob",
-            "is_verified",
-            "is_name_setup",
-            "referral_code",
-            "referred_by",
-            "social_login_type",
-            "fb_id",
-
-            "is_bot",
-            "google_id",
-            "apple_id",
-            "device_id",
-            "device_type",
-            "metadata",
-            "created_at"
-          )
-          .orderBy(sortBy, sortOrder);
+        const result = await User.find(filter)
+          .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
+          .lean();
 
         return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
           result,
@@ -173,7 +127,11 @@ const userController = {
     try {
       const { id } = req.params;
 
-      const user = await db("users").where({ id }).select("*").first();
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return apiResponse.ErrorResponse(res, "Invalid ID format");
+      }
+
+      const user = await User.findById(id).lean();
 
       if (!user) {
         return apiResponse.ErrorResponse(res, USER.userNotFound);
@@ -181,149 +139,123 @@ const userController = {
 
       return apiResponse.successResponseWithData(res, SUCCESS.dataFound, user);
     } catch (error) {
-      console.log(error.message);
+      console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
 
   async updateUser(req, res) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
       const { id, imagePath, ...updateFields } = req.body;
-      console.log(req.body);
-  
-      updateFields.updated_at = db.fn.now();
-  
+
       if (req.file) {
         updateFields.image_url = req.file.path.replace(/\\/g, "/");
       }
-  
-      const currentUser = await db("users").where({ id }).first();
+
+      const currentUser = await User.findById(id).session(session);
       if (!currentUser) {
+        await session.abortTransaction();
+        session.endSession();
         return apiResponse.ErrorResponse(res, USER.userNotFound);
       }
-  
+
       if (updateFields.email && updateFields.email !== currentUser.email) {
-        const emailExists = await db("users")
-          .where("email", updateFields.email)
-          .whereNot("id", id)
-          .first();
-  
+        const emailExists = await User.findOne({ email: updateFields.email, _id: { $ne: id } }).session(session);
         if (emailExists) {
+          await session.abortTransaction();
+          session.endSession();
           return apiResponse.ErrorResponse(res, ADMIN.emailExists);
         }
       }
-  
-      // Check if phone is being updated and already exists (including deleted users)
+
       if (updateFields.phone && updateFields.phone !== currentUser.phone) {
-        const phoneExists = await db("users")
-          .where("phone", updateFields.phone)
-          .whereNot("id", id)
-          .first();
-  
+        const phoneExists = await User.findOne({ phone: updateFields.phone, _id: { $ne: id } }).session(session);
         if (phoneExists) {
+          await session.abortTransaction();
+          session.endSession();
           return apiResponse.ErrorResponse(res, USER.phoneNumberExists);
         }
       }
-  
+
       let walletUpdated = false;
       let referralBonusUpdated = false;
       let newBalance = null;
       let newBonus = null;
-  
-      // Wallet update
+
       if (updateFields.wallet_balance !== undefined) {
         newBalance = Number(updateFields.wallet_balance);
-  
-        await db("users")
-          .where({ id })
-          .update({ wallet_balance: newBalance, updated_at: db.fn.now() });
-  
-        await db("wallet")
-          .where({ user_id: id })
-          .update({ balance: newBalance, updated_at: db.fn.now() });
-  
+        currentUser.wallet_balance = newBalance;
+
+        await Wallet.findOneAndUpdate(
+          { user: id },
+          { balance: newBalance },
+          { session, upsert: true }
+        );
         walletUpdated = true;
-  
         delete updateFields.wallet_balance;
       }
-  
-      // Referral bonus update
+
       if (updateFields.referral_bonus !== undefined) {
         newBonus = Number(updateFields.referral_bonus);
-  
-        await db("users")
-          .where({ id })
-          .update({ referral_bonus: newBonus, updated_at: db.fn.now() });
-  
+        currentUser.referral_bonus = newBonus;
         referralBonusUpdated = true;
-  
         delete updateFields.referral_bonus;
       }
-  
-      // Other fields update
-      const [updated] = await db("users")
-        .where({ id })
-        .update(updateFields)
-        .returning("*");
-  
-      if (!updated) {
-        return apiResponse.ErrorResponse(res, USER.userNotFound);
-      }
-  
-      // Send notifications
+
+      // Update remaining fields
+      Object.assign(currentUser, updateFields);
+      const updatedUser = await currentUser.save({ session });
+
+      // Notifications
       if (walletUpdated) {
-        const title = "Wallet Updated by Admin";
-        const content = `Your wallet balance has been updated to ৳${newBalance}`;
-  
-        await db("notifications").insert({
-          user_id: id,
-          title,
-          content,
+        await new Notification({
+          user: id,
+          title: "Wallet Updated by Admin",
+          content: `Your wallet balance has been updated to ৳${newBalance}`,
           is_read: false,
-          sent_at: db.fn.now(),
-          created_at: db.fn.now(),
-        });
+        }).save({ session });
       }
-  
+
       if (referralBonusUpdated) {
-        const title = "Referral Bonus Updated";
-        const content = `Your referral bonus has been updated to ৳${newBonus}`;
-  
-        await db("notifications").insert({
-          user_id: id,
-          title,
-          content,
+        await new Notification({
+          user: id,
+          title: "Referral Bonus Updated",
+          content: `Your referral bonus has been updated to ৳${newBonus}`,
           is_read: false,
-          sent_at: db.fn.now(),
-          created_at: db.fn.now(),
-        });
+        }).save({ session });
       }
-  
+
+      await session.commitTransaction();
+      session.endSession();
+
       return apiResponse.successResponseWithData(
         res,
         USER.userUpdated,
-        updated
+        updatedUser
       );
     } catch (error) {
-      console.log(error.message);
+      await session.abortTransaction();
+      session.endSession();
+      console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-  
 
   async changeStatus(req, res) {
     try {
-      const { id } = req.body;
-      const { status } = req.body;
+      const { id, status } = req.body;
 
       if (![0, 1, 2].includes(status)) {
         return apiResponse.ErrorResponse(res, USER.invalidStatusValue);
       }
 
-      const [updated] = await db("users")
-        .where({ id })
-        .update({ status, updated_at: db.fn.now() })
-        .returning("*");
+      const updated = await User.findByIdAndUpdate(
+        id,
+        { status },
+        { new: true }
+      );
 
       if (!updated) {
         return apiResponse.ErrorResponse(res, USER.userNotFound);
@@ -335,7 +267,7 @@ const userController = {
         updated
       );
     } catch (error) {
-      console.log(error.message);
+      console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
@@ -344,10 +276,11 @@ const userController = {
     try {
       const { id } = req.body;
 
-      const [updated] = await db("users")
-        .where({ id })
-        .update({ status: 2, updated_at: db.fn.now() })
-        .returning("*");
+      const updated = await User.findByIdAndUpdate(
+        id,
+        { status: 2 },
+        { new: true }
+      );
 
       if (!updated) {
         return apiResponse.ErrorResponse(res, USER.userNotDeleted);
@@ -359,7 +292,7 @@ const userController = {
         updated
       );
     } catch (error) {
-      console.log(error.message);
+      console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
@@ -372,7 +305,7 @@ const userController = {
         return apiResponse.ErrorResponse(res, USER.userIDrequired);
       }
 
-      const user = await db("users").where({ id: userId }).first();
+      const user = await User.findById(userId);
       if (!user) {
         return apiResponse.ErrorResponse(res, USER.userNotFound);
       }
@@ -381,32 +314,25 @@ const userController = {
       let exists = true;
       while (exists) {
         referralCode = generateReferralCode();
-        const codeExists = await db("users")
-          .where("referral_code", referralCode)
-          .first();
+        const codeExists = await User.findOne({ referral_code: referralCode });
         exists = !!codeExists;
       }
 
-      const [updated] = await db("users").where({ id: userId }).update(
-        {
-          referral_code: referralCode,
-          referral_bonus: bonus,
-          updated_at: db.fn.now(),
-        },
-        "*"
-      );
-      await db("notifications").insert({
-        user_id: userId,
-        title: "Referral Code Genrated",
+      user.referral_code = referralCode;
+      user.referral_bonus = bonus;
+      await user.save();
+
+      await new Notification({
+        user: userId,
+        title: "Referral Code Generated",
         content: `Your referral code ${referralCode} has been generated successfully. got a bonus of ৳${bonus}.`,
-        created_at: db.fn.now(),
         is_read: false,
-      });
+      }).save();
 
       return apiResponse.successResponseWithData(
         res,
         USER.referralCodeAdded,
-        updated
+        user
       );
     } catch (error) {
       console.error("Error in addReferralCode:", error.message);

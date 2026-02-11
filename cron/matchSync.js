@@ -1,64 +1,60 @@
 const cron = require('node-cron');
 const axios = require('axios');
-const db = require('../config/database');
+const mongoose = require('mongoose');
+const Team = require('../models/Team');
+const Match = require('../models/Match');
 
 // Helper function to get or create team
-async function getOrCreateTeam(teamData, trx) {
-    const team = await trx('teams')
-        .where('name', teamData.name)
-        .first();
+async function getOrCreateTeam(teamData, session) {
+    let team = await Team.findOne({ name: teamData.name }).session(session);
 
-    if (team) return team.id;
+    if (team) return team._id;
 
-    const [newTeam] = await trx('teams')
-        .insert({
-            name: teamData.name,
-            short_name: teamData.shortName,
-            logo_url: teamData.logoUrl,
-            country: teamData.country
-        })
-        .returning('id');
+    const [newTeam] = await Team.create([{
+        name: teamData.name,
+        short_name: teamData.shortName,
+        logo_url: teamData.logoUrl,
+        country_id: teamData.country // Assuming country maps to country_id
+    }], { session });
 
-    return newTeam.id;
+    return newTeam._id;
 }
 
 // Function to sync matches
 async function syncMatches() {
-   
     try {
-        // Fetch matches from external API
         const response = await axios.get(process.env.CRICKET_API_URL + '/matches');
         const matches = response.data;
 
-        // Begin transaction
-        const trx = await db.transaction();
+        const session = await mongoose.startSession();
+        session.startTransaction();
 
         try {
             for (const match of matches) {
-                // Check if teams exist, create if not
-                const team1Id = await getOrCreateTeam(match.team1, trx);
-                const team2Id = await getOrCreateTeam(match.team2, trx);
+                const team1Id = await getOrCreateTeam(match.team1, session);
+                const team2Id = await getOrCreateTeam(match.team2, session);
 
-                // Update or create match
-                await trx('matches')
-                    .insert({
-                        team1_id: team1Id,
-                        team2_id: team2Id,
-                        start_time: match.startTime,
-                        venue: match.venue,
-                        match_type: match.matchType,
-                        status: 'upcoming',
-                        is_visible: false // Admin needs to make it visible
-                    })
-                    .onConflict(['team1_id', 'team2_id', 'start_time'])
-                    .merge();
+                await Match.findOneAndUpdate(
+                    { team1: team1Id, team2: team2Id, start_time: new Date(match.startTime) },
+                    {
+                        $set: {
+                            venue: match.venue,
+                            match_type: match.matchType,
+                            status: 'upcoming',
+                            is_visible: false
+                        }
+                    },
+                    { upsert: true, session }
+                );
             }
 
-            await trx.commit();
-         
+            await session.commitTransaction();
+            console.log('Match sync successful');
         } catch (error) {
-            await trx.rollback();
+            await session.abortTransaction();
             throw error;
+        } finally {
+            session.endSession();
         }
     } catch (error) {
         console.error('Match sync failed:', error);
@@ -68,7 +64,4 @@ async function syncMatches() {
 // Schedule cron job to run every hour
 cron.schedule('0 * * * *', syncMatches);
 
-// Export for manual execution
-module.exports = {
-    syncMatches
-}; 
+module.exports = { syncMatches };

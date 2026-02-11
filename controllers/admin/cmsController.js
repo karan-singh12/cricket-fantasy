@@ -1,49 +1,41 @@
 const path = require("path");
-const { knex: db } = require("../../config/database");
+const Cms = require("../../models/Cms");
 const apiResponse = require("../../utils/apiResponse");
 const {
   slugGenrator,
-  listing,
   deleteFileIfExists,
 } = require("../../utils/functions");
 const { ERROR, CONTENT, SUCCESS, EMAILTEMPLATE, USER } = require("../../utils/responseMsg");
-
-const TABLE = "cms";
 
 const contentController = {
   async addContent(req, res) {
     try {
       const { title, description, contentType, status = 1 } = req.body;
 
-      const existingContent = await db(TABLE).where({ contentType }).first();
+      const existingContent = await Cms.findOne({ contentType });
 
       if (existingContent) {
         return apiResponse.ErrorResponse(
           res,
-         CONTENT.contentWithThisTypeAlreadyExists
+          CONTENT.contentWithThisTypeAlreadyExists
         );
       }
 
       let imagePath = null;
-
       if (req.file) {
         imagePath = req.file.path.replace(/\\/g, "/");
       }
 
       const slug = await slugGenrator(contentType);
 
-      const [result] = await db(TABLE)
-        .insert({
-          title,
-          description,
-          contentType: contentType,
-          slug,
-          status,
-          image_path: imagePath,
-          createdAt: db.fn.now(),
-          modifiedAt: db.fn.now(),
-        })
-        .returning("*");
+      const result = await Cms.create({
+        title,
+        description,
+        contentType,
+        slug,
+        status,
+        image_path: imagePath,
+      });
 
       return apiResponse.successResponseWithData(
         res,
@@ -52,7 +44,6 @@ const contentController = {
       );
     } catch (error) {
       console.error(error);
-
       if (req.file && req.file.path) {
         deleteFileIfExists(req.file.path);
       }
@@ -66,47 +57,45 @@ const contentController = {
         pageSize = 10,
         pageNumber = 1,
         searchItem = "",
-
         status = [],
       } = req.body;
 
-      pageNumber = Math.max(0, pageNumber - 1);
+      const limit = parseInt(pageSize) || 10;
+      const skip = (Math.max(1, parseInt(pageNumber)) - 1) * limit;
 
-      let query = db(TABLE).whereNot("status", 2);
+      const filter = { status: { $ne: 2 } };
 
       if (status.length > 0) {
-        query.andWhere((qb) => qb.whereIn("status", status));
+        filter.status = { $in: status.map(Number) };
       }
 
       if (searchItem) {
-        query.andWhere((builder) =>
-          builder
-            .whereILike("title", `%${searchItem}%`)
-            .orWhereILike("description", `%${searchItem}%`)
-        );
+        filter.$or = [
+          { title: { $regex: searchItem, $options: "i" } },
+          { description: { $regex: searchItem, $options: "i" } }
+        ];
       }
 
-      const totalRecordsData = await query.clone().count("id").first();
+      const totalRecords = await Cms.countDocuments(filter);
+      const result = await Cms.find(filter)
+        .select("title contentType slug created_at status description")
+        .sort({ created_at: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
 
-      const result = await query
-        .select(
-          "id",
-          "title",
-          "contentType",
-          "slug",
-          "createdAt",
-          "status",
-          "description"
-        )
-
-        .limit(pageSize)
-        .offset(pageNumber * pageSize);
+      // Mapping created_at to createdAt for frontend parity if needed
+      const mappedResult = result.map(item => ({
+        ...item,
+        id: item._id,
+        createdAt: item.created_at
+      }));
 
       return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
-        result,
-        totalRecords: parseInt(totalRecordsData.count),
-        pageNumber: pageNumber + 1,
-        pageSize,
+        result: mappedResult,
+        totalRecords,
+        pageNumber: parseInt(pageNumber),
+        pageSize: limit,
       });
     } catch (error) {
       console.error(error.message);
@@ -116,15 +105,18 @@ const contentController = {
 
   async getOneContent(req, res) {
     try {
-      const result = await db(TABLE)
-        .select("id", "title", "description", "slug")
-        .where({ id: req.params.id })
-        .first();
+      const result = await Cms.findById(req.params.id)
+        .select("title description slug")
+        .lean();
+
+      if (!result) {
+        return apiResponse.ErrorResponse(res, CONTENT.contentNotFound);
+      }
 
       return apiResponse.successResponseWithData(
         res,
         SUCCESS.dataFound,
-        result
+        { ...result, id: result._id }
       );
     } catch (error) {
       console.log(error.message);
@@ -137,28 +129,28 @@ const contentController = {
       const { id, title, description, status } = req.body;
 
       let imagePath = null;
-
       if (req.file) {
         imagePath = req.file.path.replace(/\\/g, "/");
       }
 
-      const oldRecord = await db(TABLE)
-        .select("image_path")
-        .where({ id })
-        .first();
+      const oldRecord = await Cms.findById(id);
+      if (!oldRecord) {
+        return apiResponse.ErrorResponse(res, CONTENT.contentNotFound);
+      }
 
-      const [data] = await db(TABLE)
-        .where({ id })
-        .update({
-          title,
-          description,
-          image_path: imagePath || oldRecord.image_path,
-          status,
-          modifiedAt: db.fn.now(),
-        })
-        .returning("*");
+      const updateData = {
+        title,
+        description,
+        status,
+      };
 
-      if (imagePath && oldRecord && oldRecord.image_path) {
+      if (imagePath) {
+        updateData.image_path = imagePath;
+      }
+
+      const data = await Cms.findByIdAndUpdate(id, updateData, { new: true }).lean();
+
+      if (imagePath && oldRecord.image_path) {
         deleteFileIfExists(path.join(process.cwd(), oldRecord.image_path));
       }
 
@@ -182,10 +174,9 @@ const contentController = {
           break;
       }
 
-      return apiResponse.successResponseWithData(res, msg, data);
+      return apiResponse.successResponseWithData(res, msg, { ...data, id: data._id });
     } catch (error) {
       console.log(error.message);
-
       if (req.file && req.file.path) {
         deleteFileIfExists(req.file.path);
       }
@@ -195,17 +186,13 @@ const contentController = {
 
   async changeStatus(req, res) {
     try {
-      const { id } = req.body;
-      const { status } = req.body;
+      const { id, status } = req.body;
 
       if (![0, 1].includes(status)) {
         return apiResponse.ErrorResponse(res, USER.invalidStatusValue);
       }
 
-      const [updated] = await db(TABLE)
-        .where({ id })
-        .update({ status, modifiedAt: db.fn.now() })
-        .returning("*");
+      const updated = await Cms.findByIdAndUpdate(id, { status }, { new: true }).lean();
 
       if (!updated) {
         return apiResponse.ErrorResponse(
@@ -217,7 +204,7 @@ const contentController = {
       return apiResponse.successResponseWithData(
         res,
         `Status updated to ${status}`,
-        updated
+        { ...updated, id: updated._id }
       );
     } catch (error) {
       console.log(error.message);

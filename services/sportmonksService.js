@@ -28,7 +28,7 @@ class SportMonksService {
         console.error("Unexpected API response structure:", response.data);
         throw new Error("Unexpected API response structure");
       }
-      
+
 
       return response.data;
     } catch (error) {
@@ -37,8 +37,7 @@ class SportMonksService {
         error.response?.data || error.message
       );
       throw new Error(
-        `Failed to fetch leagues: ${
-          error.response?.data?.message || error.message
+        `Failed to fetch leagues: ${error.response?.data?.message || error.message
         }`
       );
     }
@@ -70,8 +69,7 @@ class SportMonksService {
         error.response?.data || error.message
       );
       throw new Error(
-        `Failed to fetch seasons: ${
-          error.response?.data?.message || error.message
+        `Failed to fetch seasons: ${error.response?.data?.message || error.message
         }`
       );
     }
@@ -103,8 +101,7 @@ class SportMonksService {
         error.response?.data || error.message
       );
       throw new Error(
-        `Failed to fetch seasons: ${
-          error.response?.data?.message || error.message
+        `Failed to fetch seasons: ${error.response?.data?.message || error.message
         }`
       );
     }
@@ -112,7 +109,7 @@ class SportMonksService {
 
   // Fetch squad (Team Players) for a team in a season (Tournament team) from SportMonks API (squad = Team Players) ..........
   async getTeamSquadservice(teamId, seasonId) {
- 
+
     try {
       const seasonIdInt = Number(
         typeof seasonId === "object" && seasonId !== null
@@ -131,7 +128,7 @@ class SportMonksService {
           },
         }
       );
-  
+
 
       return response.data;
     } catch (error) {
@@ -140,8 +137,7 @@ class SportMonksService {
         error.response?.data || error.message
       );
       throw new Error(
-        `Failed to fetch team squad: ${
-          error.response?.data?.message || error.message
+        `Failed to fetch team squad: ${error.response?.data?.message || error.message
         }`
       );
     }
@@ -164,8 +160,7 @@ class SportMonksService {
         error.response?.data || error.message
       );
       throw new Error(
-        `Failed to fetch team details: ${
-          error.response?.data?.message || error.message
+        `Failed to fetch team details: ${error.response?.data?.message || error.message
         }`
       );
     }
@@ -187,8 +182,7 @@ class SportMonksService {
         error.response?.data || error.message
       );
       throw new Error(
-        `Failed to fetch player details: ${
-          error.response?.data?.message || error.message
+        `Failed to fetch player details: ${error.response?.data?.message || error.message
         }`
       );
     }
@@ -214,8 +208,7 @@ class SportMonksService {
         error.response?.data || error.message
       );
       throw new Error(
-        `Failed to fetch season stages: ${
-          error.response?.data?.message || error.message
+        `Failed to fetch season stages: ${error.response?.data?.message || error.message
         }`
       );
     }
@@ -236,8 +229,7 @@ class SportMonksService {
         error.response?.data || error.message
       );
       throw new Error(
-        `Failed to fetch season stages: ${
-          error.response?.data?.message || error.message
+        `Failed to fetch season stages: ${error.response?.data?.message || error.message
         }`
       );
     }
@@ -258,8 +250,7 @@ class SportMonksService {
         error.response?.data || error.message
       );
       throw new Error(
-        `Failed to fetch season stages: ${
-          error.response?.data?.message || error.message
+        `Failed to fetch season stages: ${error.response?.data?.message || error.message
         }`
       );
     }
@@ -274,13 +265,13 @@ class SportMonksService {
           include: "scoreboards,batting.wicket,bowling,balls.score",
         },
       });
-  
+
       return response.data;
     } catch (error) {
       // Prepare a new error object with status
       const err = new Error(`Error fetching fixture ${fixtureId} details: ${error.response?.data || error.message}`);
       err.status = error.response?.status || 500;
-  
+
       console.error(err.message);
       throw err;
     }
@@ -319,7 +310,7 @@ class SportMonksService {
         },
       });
 
-    
+
 
       return response.data;
     } catch (error) {
@@ -328,8 +319,7 @@ class SportMonksService {
         error.response?.data || error.message
       );
       throw new Error(
-        `Failed to fetch player details: ${
-          error.response?.data?.message || error.message
+        `Failed to fetch player details: ${error.response?.data?.message || error.message
         }`
       );
     }
@@ -337,7 +327,7 @@ class SportMonksService {
 
   async getPlayingXI(matchId) {
     try {
-   
+
       // Fetch fixture with lineup data using the correct include parameter
       const response = await axios.get(`${this.baseURL}/fixtures/${matchId}`, {
         params: {

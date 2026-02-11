@@ -1,34 +1,28 @@
-const { knex: db } = require("../../config/database");
+const User = require("../../models/User");
+const Wallet = require("../../models/Wallet");
+const Transaction = require("../../models/Transaction");
+const Notification = require("../../models/Notification");
+const NotificationTemplate = require("../../models/NotificationTemplate");
+const ReferralSetting = require("../../models/ReferralSetting");
 const apiResponse = require("../../utils/apiResponse");
 const { ERROR, SUCCESS } = require("../../utils/responseMsg");
 const PDFDocument = require("pdfkit");
+const mongoose = require("mongoose");
 
 const referralController = {
   async getReferralSettings(req, res) {
     try {
-      const settings = await db("referral_settings").first();
+      let settings = await ReferralSetting.findOne();
 
       if (!settings) {
-        const defaultSettings = {
+        settings = await ReferralSetting.create({
           is_active: true,
           referrer_bonus: 100.0,
           referee_bonus: 100.0,
           max_referrals_per_user: 0,
           min_referee_verification: true,
           bonus_currency: "BDT",
-          created_at: db.fn.now(),
-          updated_at: db.fn.now(),
-        };
-
-        const [newSettings] = await db("referral_settings")
-          .insert(defaultSettings)
-          .returning("*");
-
-        return apiResponse.successResponseWithData(
-          res,
-          SUCCESS.dataFound,
-          newSettings
-        );
+        });
       }
 
       return apiResponse.successResponseWithData(
@@ -54,60 +48,27 @@ const referralController = {
       } = req.body;
 
       if (referrer_bonus === undefined || referee_bonus === undefined) {
-        apiResponse.ErrorResponse(
+        return apiResponse.ErrorResponse(
           res,
           "referrer_bonus and referee_bonus are required"
         );
-        return;
-      }
-
-      if (
-        isNaN(parseFloat(referrer_bonus)) ||
-        isNaN(parseFloat(referee_bonus))
-      ) {
-        return apiResponse.ErrorResponse(
-          res,
-          "referrer_bonus and referee_bonus must be valid numbers"
-        );
-        return;
       }
 
       const updateData = {
-        updated_at: db.fn.now(),
         is_active: is_active !== undefined ? is_active : true,
         referrer_bonus: parseFloat(referrer_bonus),
         referee_bonus: parseFloat(referee_bonus),
-        max_referrals_per_user:
-          max_referrals_per_user !== undefined
-            ? parseInt(max_referrals_per_user)
-            : 0,
-        min_referee_verification:
-          min_referee_verification !== undefined
-            ? min_referee_verification
-            : true,
+        max_referrals_per_user: max_referrals_per_user !== undefined ? parseInt(max_referrals_per_user) : 0,
+        min_referee_verification: min_referee_verification !== undefined ? min_referee_verification : true,
         bonus_currency: bonus_currency || "BDT",
       };
 
-      const existingSettings = await db("referral_settings").first();
-
-      let updatedSettings;
-      if (existingSettings) {
-        [updatedSettings] = await db("referral_settings")
-          .update(updateData)
-          .returning("*");
-      } else {
-        [updatedSettings] = await db("referral_settings")
-          .insert({
-            ...updateData,
-            created_at: db.fn.now(),
-          })
-          .returning("*");
-      }
+      const settings = await ReferralSetting.findOneAndUpdate({}, updateData, { upsert: true, new: true });
 
       return apiResponse.successResponseWithData(
         res,
         "Referral settings updated successfully",
-        updatedSettings
+        settings
       );
     } catch (error) {
       console.error("Error in updateReferralSettings:", error);
@@ -119,66 +80,87 @@ const referralController = {
     try {
       const { start_date, end_date } = req.body;
 
-      let query = db("users").whereNotNull("referred_by");
+      const filter = { referred_by: { $ne: null } };
       if (start_date && end_date) {
-        query = query.whereBetween("created_at", [start_date, end_date]);
+        filter.created_at = { $gte: new Date(start_date), $lte: new Date(end_date) };
       }
 
-      const totalReferrals = await query.clone().count("* as count").first();
+      const totalReferrals = await User.countDocuments(filter);
 
-     
+      const distinctReferrers = await User.distinct("referred_by", filter);
+      const totalReferrers = distinctReferrers.length;
 
-      const totalReferrers = await db("users")
-        .whereExists(function () {
-          this.select("*")
-            .from("users as u2")
-            .whereRaw("CAST(u2.referred_by AS INTEGER) = users.id");
-        })
-        .count("* as count")
-        .first();
+      const bonusResult = await Transaction.aggregate([
+        { $match: { transactionType: "referral_bonus", status: "SUCCESS" } },
+        { $group: { _id: null, total: { $sum: "$amount" } } }
+      ]);
+      const totalBonusPaid = bonusResult.length > 0 ? bonusResult[0].total : 0;
 
-      const totalBonusPaid = await db("transactions")
-        .where('"transactionType"', "referral_bonus")
-        .where("status", "SUCCESS")
-        .sum("amount as total")
-        .first();
+      const monthlyReferrals = await User.aggregate([
+        { $match: { referred_by: { $ne: null } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m", date: "$created_at" } },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { _id: -1 } },
+        { $limit: 6 },
+        { $project: { month: "$_id", count: 1, _id: 0 } }
+      ]);
 
-      const monthlyReferrals = await db("users")
-        .whereNotNull("referred_by")
-        .select(
-          db.raw("DATE_TRUNC('month', created_at) as month"),
-          db.raw("COUNT(*) as count")
-        )
-        .groupBy("month")
-        .orderBy("month", "desc")
-        .limit(6);
-
-      const topReferrers = await db("users as u1")
-        .select(
-          "u1.id",
-          "u1.name",
-          "u1.email",
-          "u1.phone",
-          "u1.referral_code",
-          db.raw("COUNT(u2.id) as referral_count"),
-          db.raw("COALESCE(SUM(t.amount), 0) as total_bonus_earned")
-        )
-        .leftJoin("users as u2", function () {
-          this.on(db.raw("CAST(u2.referred_by AS INTEGER)"), "=", "u1.id");
-        })
-        .leftJoin("transactions as t", function () {
-          this.on("t.user_id", "=", "u1.id")
-            .andOn('t."transactionType"', "=", db.raw("'referral_bonus'"))
-            .andOn("t.status", "=", db.raw("'SUCCESS'"));
-        })
-        .groupBy("u1.id", "u1.name", "u1.email", "u1.phone", "u1.referral_code")
-        .orderBy("referral_count", "desc")
-        .limit(3);
+      const topReferrers = await User.aggregate([
+        { $match: { referred_by: { $ne: null } } },
+        { $group: { _id: "$referred_by", referral_count: { $sum: 1 } } },
+        { $sort: { referral_count: -1 } },
+        { $limit: 3 },
+        {
+          $lookup: {
+            from: "users",
+            localField: "_id",
+            foreignField: "_id",
+            as: "referrer"
+          }
+        },
+        { $unwind: "$referrer" },
+        {
+          $lookup: {
+            from: "transactions",
+            let: { refId: "$_id" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ["$user", "$$refId"] },
+                      { $eq: ["$transactionType", "referral_bonus"] },
+                      { $eq: ["$status", "SUCCESS"] }
+                    ]
+                  }
+                }
+              },
+              { $group: { _id: null, total: { $sum: "$amount" } } }
+            ],
+            as: "bonus"
+          }
+        },
+        {
+          $project: {
+            id: "$_id",
+            name: "$referrer.name",
+            email: "$referrer.email",
+            phone: "$referrer.phone",
+            referral_code: "$referrer.referral_code",
+            referral_count: 1,
+            total_bonus_earned: { $ifNull: [{ $arrayElemAt: ["$bonus.total", 0] }, 0] }
+          }
+        }
+      ]);
 
       const stats = {
-        total_referrals: parseInt(totalReferrals.count) || 0,
-        total_referrers: parseInt(totalReferrers.count) || 0,
-        total_bonus_paid: parseFloat(totalBonusPaid.total) || 0,
+        total_referrals: totalReferrals,
+        total_referrers: totalReferrers,
+        total_bonus_paid: totalBonusPaid,
         monthly_referrals: monthlyReferrals,
         top_referrers: topReferrers,
       };
@@ -202,112 +184,62 @@ const referralController = {
         status = [],
       } = req.body;
 
-      let query = db("users as u1")
-        .select(
-          "u1.id",
-          "u1.name",
-          "u1.email",
-          "u1.phone",
-          "u1.referral_code",
-          "u1.referred_by",
-          "u1.is_verified",
-          "u1.created_at",
-          "u2.name as referrer_name",
-          "u2.email as referrer_email"
-        )
-        .leftJoin("users as u2", function () {
-          this.on(db.raw("CAST(u1.referred_by AS INTEGER)"), "=", "u2.id");
-        })
-        .whereNotNull("u1.referred_by");
+      const limit = parseInt(pageSize) || 10;
+      const skip = (Math.max(1, parseInt(pageNumber)) - 1) * limit;
+
+      const filter = { referred_by: { $ne: null } };
 
       if (referrer_id) {
-        query.andWhere(db.raw("CAST(u1.referred_by AS INTEGER)"), referrer_id);
+        filter.referred_by = referrer_id;
       }
 
       if (status.length > 0) {
-        query.andWhere("u1.status", status);
+        filter.status = { $in: status.map(Number) };
       }
 
       if (searchItem) {
-        query.andWhere(function (builder) {
-          builder
-            .whereILike("u1.name", `%${searchItem}%`)
-            .orWhereILike("u1.email", `%${searchItem}%`)
-            .orWhereILike("u2.name", `%${searchItem}%`)
-            .orWhereILike("u2.email", `%${searchItem}%`);
-        });
+        // This search might be tricky with referenced fields in Mongoose find
+        // We might need an aggregation for full search flexibility
+        filter.$or = [
+          { name: { $regex: searchItem, $options: "i" } },
+          { email: { $regex: searchItem, $options: "i" } }
+        ];
       }
 
-      // Calculate total records
-      const totalRecordsQuery = db("users as u1")
-        .whereNotNull("u1.referred_by")
-        .count("* as count")
-        .first();
+      const totalRecords = await User.countDocuments(filter);
+      const result = await User.find(filter)
+        .populate("referred_by", "name email phone")
+        .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
 
-      if (referrer_id) {
-        totalRecordsQuery.andWhere(
-          db.raw("CAST(u1.referred_by AS INTEGER)"),
-          referrer_id
-        );
-      }
-
-      if (status.length > 0) {
-        totalRecordsQuery.andWhere("u1.status", status);
-      }
-
-      if (searchItem) {
-        totalRecordsQuery
-          .andWhere(function (builder) {
-            builder
-              .whereILike("u1.name", `%${searchItem}%`)
-              .orWhereILike("u1.email", `%${searchItem}%`)
-              .orWhereILike("u2.name", `%${searchItem}%`)
-              .orWhereILike("u2.email", `%${searchItem}%`);
-          })
-          .leftJoin("users as u2", function () {
-            this.on(db.raw("CAST(u1.referred_by AS INTEGER)"), "=", "u2.id");
-          });
-      }
-
-      const totalRecords = await totalRecordsQuery;
-
-      const offset = (pageNumber - 1) * pageSize;
-      const result = await query
-        .orderBy(sortBy, sortOrder)
-        .limit(pageSize)
-        .offset(offset);
-
-      // Add additional data for each result
       const enrichedResult = await Promise.all(
         result.map(async (user) => {
-          // Get referrals made by this user
-          const referralsMade = await db("users")
-            .where(db.raw("CAST(referred_by AS INTEGER)"), user.id)
-            .count("* as count")
-            .first();
-
-          // Get bonus earned by this user (fixed column reference)
-          const bonusEarned = await db("transactions")
-            .where("user_id", user.id)
-            .where("transactionType", "referral_bonus") // Removed quotes
-            .where("status", "SUCCESS")
-            .sum("amount as total")
-            .first();
+          const referralsMade = await User.countDocuments({ referred_by: user._id });
+          const bonusResult = await Transaction.aggregate([
+            { $match: { user: user._id, transactionType: "referral_bonus", status: "SUCCESS" } },
+            { $group: { _id: null, total: { $sum: "$amount" } } }
+          ]);
+          const bonusEarned = bonusResult.length > 0 ? bonusResult[0].total : 0;
 
           return {
             ...user,
-            referrals_made: parseInt(referralsMade.count) || 0,
-            bonus_earned: parseFloat(bonusEarned.total) || 0,
+            id: user._id,
+            referrer_name: user.referred_by?.name,
+            referrer_email: user.referred_by?.email,
+            referrals_made: referralsMade,
+            bonus_earned: bonusEarned,
           };
         })
       );
 
       return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
         result: enrichedResult,
-        totalRecords: parseInt(totalRecords.count),
-        pageNumber,
-        pageSize,
-        totalPages: Math.ceil(parseInt(totalRecords.count) / pageSize),
+        totalRecords,
+        pageNumber: parseInt(pageNumber),
+        pageSize: limit,
+        totalPages: Math.ceil(totalRecords / limit),
       });
     } catch (error) {
       console.error("Error in getAllReferrals:", error);
@@ -319,46 +251,44 @@ const referralController = {
     try {
       const { referrer_id } = req.params;
 
-      const referrer = await db("users")
-        .where("id", referrer_id)
-        .select("id", "name", "email", "phone", "referral_code", "created_at")
-        .first();
+      const referrer = await User.findById(referrer_id)
+        .select("name email phone referral_code created_at")
+        .lean();
 
       if (!referrer) {
         return apiResponse.ErrorResponse(res, "Referrer not found");
       }
 
-      const referralsCount = await db("users")
-        .where(db.raw("CAST(referred_by AS INTEGER)"), referrer_id)
-        .count("* as count")
-        .first();
+      const referralsCount = await User.countDocuments({ referred_by: referrer_id });
 
-      const totalBonus = await db("transactions")
-        .where("user_id", referrer_id)
-        .where("transactionType", "referral_bonus")
-        .where("status", "SUCCESS")
-        .sum("amount as total")
-        .first();
+      const bonusResult = await Transaction.aggregate([
+        { $match: { user: new mongoose.Types.ObjectId(referrer_id), transactionType: "referral_bonus", status: "SUCCESS" } },
+        { $group: { _id: null, total: { $sum: "$amount" } } }
+      ]);
+      const totalBonus = bonusResult.length > 0 ? bonusResult[0].total : 0;
 
-      const recentReferrals = await db("users")
-        .where(db.raw("CAST(referred_by AS INTEGER)"), referrer_id)
-        .select("id", "name", "email", "phone", "is_verified", "created_at")
-        .orderBy("created_at", "desc")
-        .limit(10);
+      const recentReferrals = await User.find({ referred_by: referrer_id })
+        .select("name email phone is_verified created_at")
+        .sort({ created_at: -1 })
+        .limit(10)
+        .lean();
 
-      const referralTransactions = await db("transactions")
-        .where("user_id", referrer_id)
-        .where("transactionType", "referral_bonus")
-        .select("id", "amount", "status", "created_at")
-        .orderBy("created_at", "desc")
-        .limit(10);
+      const referralTransactions = await Transaction.find({
+        user: referrer_id,
+        transactionType: "referral_bonus"
+      })
+        .select("amount status created_at")
+        .sort({ created_at: -1 })
+        .limit(10)
+        .lean();
 
       const referrerDetails = {
         ...referrer,
-        referrals_count: parseInt(referralsCount.count) || 0,
-        total_bonus_earned: parseFloat(totalBonus.total) || 0,
-        recent_referrals: recentReferrals,
-        referral_transactions: referralTransactions,
+        id: referrer._id,
+        referrals_count: referralsCount,
+        total_bonus_earned: totalBonus,
+        recent_referrals: recentReferrals.map(r => ({ ...r, id: r._id })),
+        referral_transactions: referralTransactions.map(t => ({ ...t, id: t._id })),
       };
 
       return apiResponse.successResponseWithData(
@@ -374,65 +304,96 @@ const referralController = {
 
   async getReferralAnalytics(req, res) {
     try {
-      const { period = "30" } = req.body; // days
+      const { period = "30" } = req.body;
 
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - parseInt(period));
 
-      // Daily referrals for the period
-      const dailyReferrals = await db("users")
-        .whereNotNull("referred_by")
-        .where("created_at", ">=", startDate)
-        .select(db.raw("DATE(created_at) as date"), db.raw("COUNT(*) as count"))
-        .groupBy("date")
-        .orderBy("date", "asc");
+      const dailyReferrals = await User.aggregate([
+        { $match: { referred_by: { $ne: null }, created_at: { $gte: startDate } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$created_at" } },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { _id: 1 } },
+        { $project: { date: "$_id", count: 1, _id: 0 } }
+      ]);
 
-      // Referral conversion rate (referrals per referrer) - Fix: Cast referred_by to integer
-      const conversionStats = await db.raw(
-        `
-        SELECT 
-          COUNT(DISTINCT u1.id) as total_referrers,
-          COUNT(u2.id) as total_referrals,
-          ROUND(COUNT(u2.id)::numeric / NULLIF(COUNT(DISTINCT u1.id), 0), 2) as avg_referrals_per_referrer
-        FROM users u1
-        LEFT JOIN users u2 ON u1.id = CAST(u2.referred_by AS INTEGER)
-        WHERE u1.created_at >= ?
-      `,
-        [startDate]
-      );
+      const conversionStatsResult = await User.aggregate([
+        { $match: { created_at: { $gte: startDate } } },
+        {
+          $facet: {
+            totalReferrers: [
+              { $match: { referred_by: { $ne: null } } },
+              { $group: { _id: "$referred_by" } },
+              { $count: "count" }
+            ],
+            totalReferrals: [
+              { $match: { referred_by: { $ne: null } } },
+              { $count: "count" }
+            ]
+          }
+        },
+        {
+          $project: {
+            total_referrers: { $ifNull: [{ $arrayElemAt: ["$totalReferrers.count", 0] }, 0] },
+            total_referrals: { $ifNull: [{ $arrayElemAt: ["$totalReferrals.count", 0] }, 0] }
+          }
+        },
+        {
+          $project: {
+            total_referrers: 1,
+            total_referrals: 1,
+            avg_referrals_per_referrer: {
+              $cond: [{ $eq: ["$total_referrers", 0] }, 0, { $divide: ["$total_referrals", "$total_referrers"] }]
+            }
+          }
+        }
+      ]);
 
-      // Top performing referral codes - Fix: Cast referred_by to integer
-      const topReferralCodes = await db("users as u1")
-        .select(
-          "u1.referral_code",
-          "u1.name",
-          "u1.email",
-          db.raw("COUNT(u2.id) as referral_count")
-        )
-        .leftJoin("users as u2", function () {
-          this.on(db.raw("CAST(u2.referred_by AS INTEGER)"), "=", "u1.id");
-        })
-        .where("u2.created_at", ">=", startDate)
-        .groupBy("u1.referral_code", "u1.name", "u1.email")
-        .orderBy("referral_count", "desc")
-        .limit(10);
+      const topReferralCodes = await User.aggregate([
+        { $match: { referred_by: { $ne: null }, created_at: { $gte: startDate } } },
+        { $group: { _id: "$referred_by", referral_count: { $sum: 1 } } },
+        { $sort: { referral_count: -1 } },
+        { $limit: 10 },
+        {
+          $lookup: {
+            from: "users",
+            localField: "_id",
+            foreignField: "_id",
+            as: "referrer"
+          }
+        },
+        { $unwind: "$referrer" },
+        {
+          $project: {
+            referral_code: "$referrer.referral_code",
+            name: "$referrer.name",
+            email: "$referrer.email",
+            referral_count: 1,
+            _id: 0
+          }
+        }
+      ]);
 
-      // Referral bonus distribution
-      const bonusDistribution = await db("transactions")
-        .where("transactionType", "referral_bonus")
-        .where("status", "SUCCESS")
-        .where("created_at", ">=", startDate)
-        .select(
-          db.raw("DATE(created_at) as date"),
-          db.raw("SUM(amount) as total_bonus")
-        )
-        .groupBy("date")
-        .orderBy("date", "asc");
+      const bonusDistribution = await Transaction.aggregate([
+        { $match: { transactionType: "referral_bonus", status: "SUCCESS", created_at: { $gte: startDate } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$created_at" } },
+            total_bonus: { $sum: "$amount" }
+          }
+        },
+        { $sort: { _id: 1 } },
+        { $project: { date: "$_id", total_bonus: 1, _id: 0 } }
+      ]);
 
       const analytics = {
         period_days: parseInt(period),
         daily_referrals: dailyReferrals,
-        conversion_stats: conversionStats.rows[0] || {},
+        conversion_stats: conversionStatsResult.length > 0 ? conversionStatsResult[0] : {},
         top_referral_codes: topReferralCodes,
         bonus_distribution: bonusDistribution,
       };
@@ -449,6 +410,8 @@ const referralController = {
   },
 
   async addReferralBonus(req, res) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
       const { user_id, amount, reason } = req.body;
 
@@ -459,73 +422,61 @@ const referralController = {
         );
       }
 
-      const user = await db("users").where("id", user_id).first();
+      const user = await User.findById(user_id).session(session);
       if (!user) {
+        await session.abortTransaction();
+        session.endSession();
         return apiResponse.ErrorResponse(res, "User not found");
       }
 
       const bonusAmount = parseFloat(amount);
-
-      const userWallet = await db("wallet").where("user_id", user_id).first();
+      const userWallet = await Wallet.findOne({ user: user_id }).session(session);
       if (!userWallet) {
+        await session.abortTransaction();
+        session.endSession();
         return apiResponse.ErrorResponse(res, "User wallet not found");
       }
 
-      const newBalance = parseFloat(userWallet.balance) + bonusAmount;
-      const template = await db("notification_templates")
-      .where({ slug: "Referral-Bonus-Added", status: 1 })
-      .first();
-      const title = template.title || "Referral Bonus Added";
-    const content = (template.content || "")
-      .replace("{{bonusAmount}}", bonusAmount)
-      .replace("{{reason}}", reason);
+      const newBalance = userWallet.balance + bonusAmount;
+      userWallet.balance = newBalance;
+      user.wallet_balance = newBalance;
 
-    if (!template) {
-      return apiResponse.ErrorResponse(res, "Notification template not found");
-    }
+      const template = await NotificationTemplate.findOne({ slug: "Referral-Bonus-Added", status: 1 }).session(session);
+      const title = template?.title || "Referral Bonus Added";
+      const content = (template?.content || "You received {{bonusAmount}} for {{reason}}")
+        .replace("{{bonusAmount}}", bonusAmount)
+        .replace("{{reason}}", reason);
 
-      await db.transaction(async (trx) => {
-        await trx("wallet")
-          .where("user_id", user_id)
-          .update({
-            balance: newBalance.toFixed(2),
-            updated_at: trx.fn.now(),
-          });
+      await userWallet.save({ session });
+      await user.save({ session });
 
-        await trx("users")
-          .where("id", user_id)
-          .update({
-            wallet_balance: newBalance.toFixed(2),
-            updated_at: trx.fn.now(),
-          });
+      await Transaction.create([{
+        user: user_id,
+        amount: bonusAmount,
+        currency: "BDT",
+        status: "SUCCESS",
+        transactionType: "referral_bonus",
+        payment_id: `MANUAL_BY_ADMIN${Date.now()}`,
+      }], { session });
 
-        await trx("transactions").insert({
-          user_id: user_id,
-          amount: bonusAmount,
-          currency: "BDT",
-          status: "SUCCESS",
-          transactionType: "referral_bonus",
-          payment_id: `MANUAL_BY_ADMIN${Date.now()}`,
-          created_at: trx.fn.now(),
-          updated_at: trx.fn.now(),
-        });
+      await Notification.create([{
+        user: user_id,
+        title: title,
+        content: content,
+        is_read: false,
+        sent_at: new Date(),
+      }], { session });
 
-        await trx("notifications").insert({
-          user_id: user_id,
-          title: title,
-          content: content,
-          is_read: false,
-          sent_at: trx.fn.now(),
-          created_at: trx.fn.now(),
-        });
-      });
-    
+      await session.commitTransaction();
+      session.endSession();
 
       return apiResponse.successResponse(
         res,
         "Referral bonus added successfully"
       );
     } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
       console.error("Error in addReferralBonus:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
@@ -535,30 +486,15 @@ const referralController = {
     try {
       const { start_date, end_date, format = "pdf" } = req.body;
 
-      let query = db("users as u1")
-        .select(
-          "u1.id",
-          "u1.name",
-          "u1.email",
-          "u1.phone",
-          "u1.referral_code",
-          "u1.referred_by",
-          "u1.is_verified",
-          "u1.created_at",
-          "u2.name as referrer_name",
-          "u2.email as referrer_email",
-          "u2.phone as referrer_phone"
-        )
-        .leftJoin("users as u2", function () {
-          this.on(db.raw("CAST(u1.referred_by AS INTEGER)"), "=", "u2.id");
-        })
-        .whereNotNull("u1.referred_by");
-
+      const filter = { referred_by: { $ne: null } };
       if (start_date && end_date) {
-        query.andWhereBetween("u1.created_at", [start_date, end_date]);
+        filter.created_at = { $gte: new Date(start_date), $lte: new Date(end_date) };
       }
 
-      const referrals = await query.orderBy("u1.created_at", "desc");
+      const referrals = await User.find(filter)
+        .populate("referred_by", "name email phone")
+        .sort({ created_at: -1 })
+        .lean();
 
       if (format === "pdf") {
         const doc = new PDFDocument({ size: "A3", margin: 50 });
@@ -594,7 +530,6 @@ const referralController = {
         const rowHeight = 45;
         const cellPadding = 10;
 
-        // Draw headers
         doc.fontSize(12).font("Helvetica-Bold");
         headers.forEach((header, i) => {
           doc.text(
@@ -605,7 +540,6 @@ const referralController = {
           );
         });
 
-        // Draw header separator
         doc
           .moveTo(tableLeft, tableTop + rowHeight)
           .lineTo(
@@ -616,7 +550,6 @@ const referralController = {
           .lineWidth(1)
           .stroke();
 
-        // Draw rows
         doc.fontSize(10).font("Helvetica");
         referrals.forEach((ref, rowIndex) => {
           const rowData = [
@@ -624,10 +557,10 @@ const referralController = {
             ref.email || "NA",
             ref.phone || "NA",
             ref.referral_code || "NA",
-            ref.referred_by || "NA",
-            ref.referrer_name || "NA",
-            ref.referrer_email || "NA",
-            ref.referrer_phone || "NA",
+            ref.referred_by?._id?.toString() || "NA",
+            ref.referred_by?.name || "NA",
+            ref.referred_by?.email || "NA",
+            ref.referred_by?.phone || "NA",
             ref.is_verified ? "Yes" : "No",
             ref.created_at.toISOString().split("T")[0],
           ];
@@ -636,8 +569,8 @@ const referralController = {
             doc.text(
               cell,
               tableLeft +
-                colWidths.slice(0, colIndex).reduce((a, b) => a + b, 0) +
-                cellPadding,
+              colWidths.slice(0, colIndex).reduce((a, b) => a + b, 0) +
+              cellPadding,
               tableTop + (rowIndex + 1) * rowHeight + cellPadding,
               {
                 width: colWidths[colIndex] - cellPadding * 2,
@@ -647,43 +580,10 @@ const referralController = {
           });
         });
 
-        // Draw table grid
-        referrals.forEach((_, rowIndex) => {
-          doc
-            .moveTo(tableLeft, tableTop + (rowIndex + 1) * rowHeight)
-            .lineTo(
-              tableLeft + colWidths.reduce((a, b) => a + b, 0),
-              tableTop + (rowIndex + 1) * rowHeight
-            )
-            .strokeColor("#CCCCCC")
-            .lineWidth(0.5)
-            .stroke();
-
-          headers.forEach((_, colIndex) => {
-            doc
-              .moveTo(
-                tableLeft +
-                  colWidths.slice(0, colIndex).reduce((a, b) => a + b, 0),
-                tableTop
-              )
-              .lineTo(
-                tableLeft +
-                  colWidths.slice(0, colIndex).reduce((a, b) => a + b, 0),
-                tableTop + (referrals.length + 1) * rowHeight
-              )
-              .strokeColor("#CCCCCC")
-              .lineWidth(0.5)
-              .stroke();
-          });
-        });
-
-        // Finalize the PDF
         doc.end();
-
         return;
       }
 
-      // JSON format (unchanged)
       return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
         format: "json",
         data: referrals,
@@ -691,6 +591,7 @@ const referralController = {
       });
     } catch (err) {
       console.log(err);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
 };

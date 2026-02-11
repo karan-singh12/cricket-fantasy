@@ -1,8 +1,8 @@
-const { knex: db } = require('../../config/database');
-const config = require('../../config/config');
+const NotificationTemplate = require('../../models/NotificationTemplate');
+const Notification = require('../../models/Notification');
 const apiResponse = require('../../utils/apiResponse');
 const { slugGenrator } = require('../../utils/functions');
-const { NOTIFICATIONTEMPLATE, ERROR, SUCCESS ,TEMPLATE} = require('../../utils/responseMsg');
+const { NOTIFICATIONTEMPLATE, ERROR, SUCCESS, TEMPLATE } = require('../../utils/responseMsg');
 
 const notificationTemplateController = {
     // Create sample notification data for testing
@@ -10,7 +10,6 @@ const notificationTemplateController = {
         try {
             const userId = req.user.id;
 
-            // 1. Create a sample template if it doesn't exist
             const sampleTemplate = {
                 title: 'Welcome to MyBest11!',
                 content: 'Hello {username}, welcome to MyBest11! Your account has been created successfully. Start playing and win exciting prizes!',
@@ -18,58 +17,32 @@ const notificationTemplateController = {
                 status: 1
             };
 
-            // Check if sample template already exists
-            let template = await db('notification_templates')
-                .where({
-                    title: sampleTemplate.title,
-                    notification_type: sampleTemplate.notification_type
-                })
-                .first();
+            let template = await NotificationTemplate.findOne({
+                title: sampleTemplate.title,
+                notification_type: sampleTemplate.notification_type
+            });
 
-            // Insert template if it doesn't exist
             if (!template) {
                 const slug = await slugGenrator(sampleTemplate.title);
-                [template] = await db('notification_templates')
-                    .insert({
-                        ...sampleTemplate,
-                        slug,
-                        created_by: userId,
-                        created_at: db.fn.now(),
-                        modified_at: db.fn.now()
-                    })
-                    .returning('*');
+                template = await NotificationTemplate.create({
+                    ...sampleTemplate,
+                    slug,
+                    created_by: userId
+                });
             }
 
-            // 2. Create a sample notification using this template
-            const notificationData = {
+            // In Mongoose, we'll just create a Notification entry for the user
+            const notification = await Notification.create({
                 title: template.title,
                 content: template.content.replace('{username}', 'Test User'),
-                template_id: template.id,
-                created_by: userId,
-                created_at: db.fn.now(),
-                updated_at: db.fn.now()
-            };
-
-            const [notification] = await db('notifications')
-                .insert(notificationData)
-                .returning('*');
-
-            // 3. Create user notification entry
-            const userNotification = {
-                notification_id: notification.id,
-                user_id: userId,  // Sending to the admin who triggered this
-                is_read: 0,
-                created_at: db.fn.now()
-            };
-
-            await db('user_notifications').insert(userNotification);
+                user: userId,
+                is_read: false,
+                type: template.notification_type,
+            });
 
             return apiResponse.successResponseWithData(res, NOTIFICATIONTEMPLATE.templateCreated, {
-                template,
-                notification: {
-                    ...notification,
-                    user_notification: userNotification
-                }
+                template: { ...template.toObject(), id: template._id },
+                notification: { ...notification.toObject(), id: notification._id }
             });
 
         } catch (error) {
@@ -78,35 +51,34 @@ const notificationTemplateController = {
         }
     },
 
-
     async addNotificationTemplate(req, res) {
         try {
             const { title, content, notification_type } = req.body;
             const slug = await slugGenrator(notification_type);
             const createdBy = req.user.id;
 
-            const existingTemp = await db('notification_templates')
-                .where('notification_type', notification_type)
-                .whereNot('status', 2)
-                .first();
+            const existingTemp = await NotificationTemplate.findOne({
+                notification_type,
+                status: { $ne: 2 }
+            });
 
             if (existingTemp) {
                 return apiResponse.ErrorResponse(res, "already exists.");
             }
 
-            const [newTemplate] = await db('notification_templates')
-                .insert({
-                    title,
-                    content,
-                    notification_type,
-                    slug,
-                    status: 1,
-                    created_at: db.fn.now(),
-                    modified_at: db.fn.now(),
-                })
-                .returning('*');
+            const newTemplate = await NotificationTemplate.create({
+                title,
+                content,
+                notification_type,
+                slug,
+                status: 1,
+                created_by: createdBy
+            });
 
-            return apiResponse.successResponseWithData(res, NOTIFICATIONTEMPLATE.templateAdded, newTemplate);
+            return apiResponse.successResponseWithData(res, NOTIFICATIONTEMPLATE.templateAdded, {
+                ...newTemplate.toObject(),
+                id: newTemplate._id
+            });
         } catch (error) {
             console.error(error);
             return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -115,36 +87,42 @@ const notificationTemplateController = {
 
     async getAllTemplates(req, res) {
         try {
-            let { pageSize, pageNumber, searchItem = "", sortBy = "created_at", sortOrder = "desc", status = [] } = req.body;
+            let { pageSize = 10, pageNumber = 1, searchItem = "", sortBy = "created_at", sortOrder = "desc", status = [] } = req.body;
 
-            pageNumber = Math.max(0, pageNumber - 1);
-            let query = db('notification_templates').whereNot('status', 2);
+            const limit = parseInt(pageSize) || 10;
+            const skip = (Math.max(1, parseInt(pageNumber)) - 1) * limit;
+
+            const filter = { status: { $ne: 2 } };
 
             if (status.length > 0) {
-                query.andWhere(qb => qb.whereIn('status', status));
+                filter.status = { $in: status.map(Number) };
             }
 
             if (searchItem) {
-                query.andWhere(builder =>
-                    builder
-                        .whereILike('title', `%${searchItem}%`)
-                        .orWhereILike('content', `%${searchItem}%`)
-                );
+                filter.$or = [
+                    { title: { $regex: searchItem, $options: "i" } },
+                    { content: { $regex: searchItem, $options: "i" } }
+                ];
             }
 
-            const totalRecords = await query.clone().count().first();
+            const totalRecords = await NotificationTemplate.countDocuments(filter);
+            const result = await NotificationTemplate.find(filter)
+                .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
+                .skip(skip)
+                .limit(limit)
+                .lean();
 
-            const result = await query
-                .select('id', 'title', 'content', 'status', 'created_at')
-                .orderBy(sortBy, sortOrder)
-                .limit(pageSize)
-                .offset(pageSize * pageNumber);
+            const mappedResult = result.map(template => ({
+                ...template,
+                id: template._id,
+                createdAt: template.created_at
+            }));
 
             return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
-                result,
-                totalRecords: parseInt(totalRecords.count),
-                pageNumber: pageNumber + 1,
-                pageSize,
+                result: mappedResult,
+                totalRecords,
+                pageNumber: parseInt(pageNumber),
+                pageSize: limit,
             });
         } catch (error) {
             console.log(error.message);
@@ -156,16 +134,16 @@ const notificationTemplateController = {
         try {
             const { id } = req.params;
 
-            const template = await db('notification_templates')
-                .where({ id })
-                .select('*')
-                .first();
+            const template = await NotificationTemplate.findById(id).lean();
 
             if (!template) {
                 return apiResponse.ErrorResponse(res, TEMPLATE.templateNotFound);
             }
 
-            return apiResponse.successResponseWithData(res, SUCCESS.dataFound, template);
+            return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
+                ...template,
+                id: template._id
+            });
         } catch (error) {
             console.log(error.message);
             return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -176,19 +154,20 @@ const notificationTemplateController = {
         try {
             const { id, title, content, status } = req.body;
 
-            
+            const updated = await NotificationTemplate.findByIdAndUpdate(id, {
+                title,
+                content,
+                status,
+            }, { new: true }).lean();
 
-            const [updated] = await db('notification_templates')
-                .where({ id })
-                .update({
-                    title,
-                    content,
-                    status,
-                    modified_at: db.fn.now(),
-                })
-                .returning('*');
+            if (!updated) {
+                return apiResponse.ErrorResponse(res, TEMPLATE.templateNotFound);
+            }
 
-            return apiResponse.successResponseWithData(res, NOTIFICATIONTEMPLATE.templateUpdated, updated);
+            return apiResponse.successResponseWithData(res, NOTIFICATIONTEMPLATE.templateUpdated, {
+                ...updated,
+                id: updated._id
+            });
         } catch (error) {
             console.log(error.message);
             return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -197,24 +176,23 @@ const notificationTemplateController = {
 
     async changeStatus(req, res) {
         try {
-            const { id } = req.body;
-            const { status } = req.body;
+            const { id, status } = req.body;
 
             if (![0, 1].includes(status)) {
                 return apiResponse.ErrorResponse(res, NOTIFICATIONTEMPLATE.invalidStatus);
             }
 
-            const [updated] = await db('notification_templates')
-                .where({ id })
-                .update({ status, modified_at: db.fn.now() })
-                .returning('*');
+            const updated = await NotificationTemplate.findByIdAndUpdate(id, { status }, { new: true }).lean();
 
             if (!updated) {
-                return apiResponse.ErrorResponse(res, NOTIFICATIONTEMPLATE.templateNotUpdated);
+                return apiResponse.ErrorResponse(res, NOTIFICATIONTEMPLATE.templateNotFound);
             }
 
             const msg = status === 1 ? NOTIFICATIONTEMPLATE.templateActivated : NOTIFICATIONTEMPLATE.templateDeactivated;
-            return apiResponse.successResponseWithData(res, msg, updated);
+            return apiResponse.successResponseWithData(res, msg, {
+                ...updated,
+                id: updated._id
+            });
         } catch (error) {
             console.log(error.message);
             return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -225,16 +203,16 @@ const notificationTemplateController = {
         try {
             const { id } = req.body;
 
-            const [deleted] = await db('notification_templates')
-                .where({ id })
-                .update({ status: 2, modified_at: db.fn.now() })
-                .returning('*');
+            const deleted = await NotificationTemplate.findByIdAndUpdate(id, { status: 2 }, { new: true }).lean();
 
             if (!deleted) {
-                return apiResponse.ErrorResponse(res, NOTIFICATIONTEMPLATE.templateNotUpdated);
+                return apiResponse.ErrorResponse(res, NOTIFICATIONTEMPLATE.templateNotFound);
             }
 
-            return apiResponse.successResponseWithData(res, NOTIFICATIONTEMPLATE.templateDeleted, deleted);
+            return apiResponse.successResponseWithData(res, NOTIFICATIONTEMPLATE.templateDeleted, {
+                ...deleted,
+                id: deleted._id
+            });
         } catch (error) {
             console.log(error.message);
             return apiResponse.ErrorResponse(res, ERROR.somethingWrong);

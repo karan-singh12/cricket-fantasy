@@ -1,6 +1,5 @@
-// languageMiddleware.js
 const { setLanguage } = require("../utils/responseMsg");
-const { knex: db } = require("../config/database");
+const Language = require("../models/Language");
 
 const languageMiddleware = async (req, res, next) => {
   try {
@@ -11,19 +10,13 @@ const languageMiddleware = async (req, res, next) => {
       "EN";
     const requestedLang = requestedLangRaw.toUpperCase();
 
-    const language = await db("language")
-      .where("language_type", requestedLang)
-      .where("status", 1)
-      .first();
+    // Use Language Model
+    const language = await Language.findOne({ language_type: requestedLang, status: 1 });
 
     const langToSet = language ? language.language_type : "EN";
-
-
     const finalLang = langToSet.toUpperCase() === "HN" ? "HI" : langToSet;
 
-
     setLanguage(finalLang);
-
     next();
   } catch (error) {
     console.error("Error in language middleware:", error);

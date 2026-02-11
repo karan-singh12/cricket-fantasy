@@ -1,11 +1,8 @@
-const { log } = require("winston");
-const { knex: db } = require("../../config/database");
+const AppDownload = require("../../models/AppDownload");
 const apiResponse = require("../../utils/apiResponse");
 const { ERROR, SUCCESS } = require("../../utils/responseMsg");
 const path = require("path");
 const fs = require("fs");
-const { platform } = require("os");
-const config = require("../../config/config");
 
 const appDownload = {
   async upload(req, res) {
@@ -39,21 +36,19 @@ const appDownload = {
         platform = "ios";
       }
 
-      const [file] = await db("app_downloads")
-        .insert({
-          file_name: req.file.originalname,
-          file_path: `apk/${req.file.filename}`,
-          current_version, // save version
-          previous_version,
-          platform,
-        })
-        .returning(["id", "file_name", "file_path"]);
+      const file = await AppDownload.create({
+        file_name: req.file.originalname,
+        file_path: `apk/${req.file.filename}`,
+        current_version,
+        previous_version,
+        platform,
+      });
 
       return apiResponse.successResponseWithData(res, "APK uploaded", {
-        id: file.id,
+        id: file._id,
         file_name: file.file_name,
         file_path: file.file_path,
-        current_version, // save version
+        current_version,
         previous_version,
         platform,
       });
@@ -67,7 +62,7 @@ const appDownload = {
     try {
       const { id } = req.params;
 
-      const deleted = await db("app_downloads").where({ id }).first();
+      const deleted = await AppDownload.findById(id);
 
       if (!deleted) {
         return apiResponse.ErrorResponse(
@@ -80,7 +75,7 @@ const appDownload = {
         fs.unlinkSync(filePath);
       }
 
-      await db("app_downloads").where({ id }).del();
+      await AppDownload.findByIdAndDelete(id);
 
       return apiResponse.successResponse(
         res,
@@ -96,19 +91,17 @@ const appDownload = {
     try {
       const { id } = req.params;
 
-      const file = await db("app_downloads").where({ id }).first();
+      const file = await AppDownload.findById(id);
       if (!file) {
         return res.status(404).send("File not found in DB");
       }
 
-      // full absolute path
       const filePath = path.join(__dirname, "../../public", file.file_path);
 
       if (!fs.existsSync(filePath)) {
         return res.status(404).send("File missing on server");
       }
 
-      // send file
       return res.download(filePath, file.file_name);
     } catch (error) {
       console.error(error);
@@ -118,9 +111,9 @@ const appDownload = {
 
   async userDownloadLatest(req, res) {
     try {
-      const file = await db("app_downloads")
-        .orderBy("created_at", "desc")
-        .first();
+      const file = await AppDownload.findOne()
+        .sort({ created_at: -1 })
+        .lean();
 
       if (!file) {
         return apiResponse.ErrorResponse(
@@ -129,9 +122,9 @@ const appDownload = {
         );
       }
 
-      const filePath = path.join( "public", file.file_path);
+      const filePath = path.join("public", file.file_path);
 
-      return res.status(200).json({path :filePath});
+      return res.status(200).json({ path: filePath });
 
     } catch (error) {
       console.error("User Download APK error:", error);
@@ -141,31 +134,30 @@ const appDownload = {
 
   async getAll(req, res) {
     try {
-      const apps = await db("app_downloads")
-        .select(
-          "id",
-          "file_name",
-          "file_path",
-          "current_version",
-          "previous_version",
-          "platform"
-        )
-        .orderBy("created_at", "desc");
+      const apps = await AppDownload.find()
+        .sort({ created_at: -1 })
+        .lean();
 
       if (!apps.length) {
         return apiResponse.successResponseWithData(res, "No APKs found", []);
       }
 
+      const mappedApps = apps.map(app => ({
+        ...app,
+        id: app._id
+      }));
+
       return apiResponse.successResponseWithData(
         res,
         "All uploaded APKs",
-        apps
+        mappedApps
       );
     } catch (error) {
       console.error("Get all APKs error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
+
   async forceUpdateCheck(req, res) {
     try {
       const { currentVersion, platform } = req.body;
@@ -178,33 +170,21 @@ const appDownload = {
         );
       }
 
-      const latest = await db("app_downloads")
-        .where({ platform })
-        .orderBy("created_at", "desc")
-        .first();
+      const latest = await AppDownload.findOne({ platform })
+        .sort({ created_at: -1 })
+        .lean();
 
       if (!latest) {
         return apiResponse.ErrorResponse(res, "No app found for this platform");
       }
-      
 
       const forceUpdate =
         compareVersions(currentVersion, latest.current_version) < 0;
 
-      // Optional update: only if you want to show suggestion for versions between previous_version and current_version
       const optionalUpdate =
         !forceUpdate &&
         compareVersions(currentVersion, latest.previous_version) < 0;
 
-      // Prepare download URL
-      let download_url = "";
-      if (platform === "android") {
-        download_url = `${
-          process.env.BACKEND_URL || "https://mybest11bd.com"
-        }/api/admin/app/user/download/latest`;
-      } else if (platform === "ios") {
-        download_url = latest.ios_app_store_link || "";
-      }
       let message = "Version check";
       if (forceUpdate) {
         message = "Latest version is out! Update now for the best experience";
@@ -221,7 +201,7 @@ const appDownload = {
         optionalUpdate,
         latestVersion: latest.current_version,
         previousVersion: latest.previous_version,
-        download_url :"https://mybest11bd.com",
+        download_url: "https://mybest11bd.com",
       });
     } catch (error) {
       console.error("Force update check error:", error);

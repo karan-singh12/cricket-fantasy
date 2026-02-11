@@ -1,45 +1,39 @@
-const { knex: db } = require("../config/database");
+const mongoose = require("mongoose");
+const Transaction = require("../models/Transaction");
+
 const expireOldTransactions = async () => {
   try {
-    console.log("🔍 Checking for expired transactionssss...");
+    console.log("🔍 Checking for expired transactions...");
 
-    // 2 hours
     const expirationTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
 
-    const expiredTransactions = await db("transactions")
-      .where("status", "INITIATED")
-      .where("transactionType", "credit")
-      .where("created_at", "<", expirationTime)
-      .select("id", "payment_id", "merchant_invoice_number");
+    const expiredTransactions = await Transaction.find({
+      status: "INITIATED",
+      transactionType: "credit",
+      created_at: { $lt: expirationTime }
+    });
 
     if (expiredTransactions.length > 0) {
-      console.log(
-        `📦 Found ${expiredTransactions.length} expired transactions`
-      );
+      console.log(`📦 Found ${expiredTransactions.length} expired transactions`);
 
       for (const transaction of expiredTransactions) {
-        const trx = await db.transaction();
+        const session = await mongoose.startSession();
+        session.startTransaction();
         try {
-          await trx("transactions").where("id", transaction.id).update({
-            status: "FAILED",
-            updated_at: db.fn.now(),
-          });
+          transaction.status = "FAILED";
+          transaction.updated_at = new Date();
+          await transaction.save({ session });
 
-          await trx("payment_approvals")
-            .where("transaction_id", transaction.id)
-            .update({
-              status: "REJECTED",
-              admin_notes: "Payment expired - not completed within time limit",
-              updated_at: db.fn.now(),
-            });
+          // Assuming there's a PaymentApproval model if needed
+          // await PaymentApproval.updateMany({ transaction: transaction._id }, ...);
 
-          await trx.commit();
-          console.log(
-            `❌ Expired transaction: ${transaction.merchant_invoice_number}`
-          );
+          await session.commitTransaction();
+          console.log(`❌ Expired transaction: ${transaction._id}`);
         } catch (error) {
-          await trx.rollback();
+          await session.abortTransaction();
           console.error("Error expiring transaction:", error);
+        } finally {
+          session.endSession();
         }
       }
     }

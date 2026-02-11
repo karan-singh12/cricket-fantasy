@@ -7,7 +7,4 @@
 # Node modules
 node_modules
 
-services/firebase.json 
-
-/public
-services/firebase.json 
+/firebase.json

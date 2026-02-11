@@ -1,4 +1,6 @@
-const { knex } = require("../../config/database");
+const Admin = require("../../models/Admin");
+const EmailTemplate = require("../../models/EmailTemplate");
+const SocialLink = require("../../models/SocialLink");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const config = require("../../config/config");
@@ -18,59 +20,41 @@ const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const admin = await knex("admins")
-      .where("email", email)
-      .whereNot("status", 2)
-      .first();
+    const admin = await Admin.findOne({ email, status: { $ne: 2 } });
 
     if (!admin || !(await bcrypt.compare(password, admin.password))) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
-      });
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
 
-    const token = jwt.sign({ id: admin.id, role: "admin" }, config.jwtSecret, {
+    const token = jwt.sign({ id: admin._id, role: "admin" }, config.jwtSecret, {
       expiresIn: "180d",
     });
 
     res.json({
-      success: true,
-      data: {
-        token,
-        admin: {
-          id: admin.id,
+      success: true, data: {
+        token, admin: {
+          id: admin._id,
           name: admin.name,
           email: admin.email,
         },
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Login failed",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Login failed", error: error.message });
   }
 };
 
 // Login1 function
 const login1 = async (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Successfully logged in",
-  });
+  res.status(200).json({ success: true, message: "Successfully logged in" });
 };
+
 // Register function
 const register = async (req, res) => {
   try {
-
-
     const { name, email, password } = req.body;
 
-    // Check if email already exists
-    const existingAdmin = await knex("admins").where("email", email).first();
-
+    const existingAdmin = await Admin.findOne({ email });
     if (existingAdmin) {
       return res.status(400).json({
         success: false,
@@ -79,21 +63,22 @@ const register = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const newAdmin = new Admin({
+      name,
+      email,
+      password: hashedPassword,
+    });
 
-    const [admin] = await knex("admins")
-      .insert({
-        name,
-        email,
-        password: hashedPassword,
-        created_at: knex.fn.now(),
-        updated_at: knex.fn.now(),
-      })
-      .returning(["id", "name", "email"]);
+    await newAdmin.save();
 
     res.status(201).json({
       success: true,
       message: "Admin registered successfully",
-      data: admin,
+      data: {
+        id: newAdmin._id,
+        name: newAdmin.name,
+        email: newAdmin.email,
+      },
     });
   } catch (error) {
     res.status(500).json({
@@ -103,29 +88,20 @@ const register = async (req, res) => {
     });
   }
 };
+
 // Logout function
 const logout = async (req, res) => {
   try {
-    res.json({
-      success: true,
-      message: "Logged out successfully",
-    });
+    res.json({ success: true, message: "Logged out successfully" });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Logout failed",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Logout failed", error: error.message });
   }
 };
 
 // Get profile function
 const getProfile = async (req, res) => {
   try {
-    const admin = await knex("admins")
-      .where("id", req.user.id)
-      .select("id", "name", "email", "created_at")
-      .first();
+    const admin = await Admin.findById(req.user.id).select("id name email created_at");
 
     if (!admin) {
       return res.status(404).json({
@@ -152,13 +128,8 @@ const updateProfile = async (req, res) => {
   try {
     const { name, email } = req.body;
 
-    // Check if email is already taken
     if (email) {
-      const existingAdmin = await knex("admins")
-        .where("email", email)
-        .whereNot("id", req.user.id)
-        .first();
-
+      const existingAdmin = await Admin.findOne({ email, _id: { $ne: req.user.id } });
       if (existingAdmin) {
         return res.status(400).json({
           success: false,
@@ -167,14 +138,11 @@ const updateProfile = async (req, res) => {
       }
     }
 
-    const [admin] = await knex("admins")
-      .where("id", req.user.id)
-      .update({
-        name,
-        email,
-        updated_at: knex.fn.now(),
-      })
-      .returning(["id", "name", "email"]);
+    const admin = await Admin.findByIdAndUpdate(
+      req.user.id,
+      { name, email },
+      { new: true }
+    ).select("id name email");
 
     res.json({
       success: true,
@@ -194,142 +162,84 @@ const updateProfile = async (req, res) => {
 const changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
-
-    const admin = await knex("admins").where("id", req.user.id).first();
+    const admin = await Admin.findById(req.user.id);
 
     if (!(await bcrypt.compare(currentPassword, admin.password))) {
-      return res.status(401).json({
-        success: false,
-        message: "Current password is incorrect",
-      });
+      return res.status(401).json({ success: false, message: "Current password is incorrect" });
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
+    admin.password = hashedPassword;
+    await admin.save();
 
-    await knex("admins").where("id", req.user.id).update({
-      password: hashedPassword,
-      updated_at: knex.fn.now(),
-    });
-
-    res.json({
-      success: true,
-      message: "Password updated successfully",
-    });
+    res.json({ success: true, message: "Password updated successfully" });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to update password",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to update password", error: error.message });
   }
 };
 
 const updateSocialLinks = async (req, res) => {
   try {
-    const { telegram, whatsapp, facebook, instagram, x, email, address, mode , credit} =
-      req.body;
+    const { telegram, whatsapp, facebook, instagram, x, email, address, mode, credit } = req.body;
 
-    const existing = await knex("social_links").first();
+    let socialLinks = await SocialLink.findOne();
 
-    let result;
-    if (existing) {
-      [result] = await knex("social_links")
-        .update({
-          telegram,
-          whatsapp,
-          facebook,
-          instagram,
-          x,
-          mode,
-          email,
-          address,
-          credit_limit: credit, 
-          updated_at: knex.fn.now(),
-        })
-        .where("id", existing.id)
-        .returning("*");
+    if (socialLinks) {
+      socialLinks.telegram = telegram;
+      socialLinks.whatsapp = whatsapp;
+      socialLinks.facebook = facebook;
+      socialLinks.instagram = instagram;
+      socialLinks.x = x;
+      socialLinks.mode = mode;
+      socialLinks.email = email;
+      socialLinks.address = address;
+      socialLinks.credit_limit = credit;
+      await socialLinks.save();
     } else {
-      [result] = await knex("social_links")
-        .insert({
-          telegram,
-          whatsapp,
-          facebook,
-          instagram,
-          x,
-          mode,
-          email,
-          address,
-          credit_limit: credit,
-          created_at: knex.fn.now(),
-          updated_at: knex.fn.now(),
-        })
-        .returning("*");
+      socialLinks = new SocialLink({
+        telegram, whatsapp, facebook, instagram, x, mode, email, address, credit_limit: credit
+      });
+      await socialLinks.save();
     }
 
-    res.json({
-      success: true,
-      message: "Social links updated successfully",
-      data: result,
-    });
+    res.json({ success: true, message: "Social links updated successfully", data: socialLinks });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to update social links",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to update social links", error: error.message });
   }
 };
 
 const getSocialLinks = async (req, res) => {
   try {
-    const socialLinks = await knex("social_links").first();
-
-    res.json({
-      success: true,
-      data: socialLinks || {},
-    });
+    const socialLinks = await SocialLink.findOne();
+    res.json({ success: true, data: socialLinks || {} });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch social links",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to fetch social links", error: error.message });
   }
 };
 
-// Add this to your authController.js
 const forgotpassword = async (req, res) => {
   try {
     const { email } = req.body;
-
-    const admin = await knex("admins").where("email", email).first();
+    const admin = await Admin.findOne({ email });
 
     if (!admin) {
-      return res.status(404).json({
-        success: false,
-        message: "Admin with this email not found",
-      });
+      return res.status(404).json({ success: false, message: "Admin with this email not found" });
     }
 
     const newPassword = generateRandomPassword();
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    await knex("admins").where("id", admin.id).update({
-      password: hashedPassword,
-      updated_at: knex.fn.now(),
+    admin.password = hashedPassword;
+    await admin.save();
+
+    const templateResult = await EmailTemplate.findOne({
+      slug: "send-password-admin",
+      status: 1,
     });
-    const templateResult = await knex("emailtemplates")
-      .select("content", "subject")
-      .where({
-        slug: "send-password-admin",
-        status: 1,
-      })
-      .first();
 
     if (templateResult) {
       let content = templateResult.content;
       content = content.replace(/{name}/g, admin.name);
-
       content = content.replace(/{password}/g, newPassword);
 
       const options = {
@@ -349,15 +259,10 @@ const forgotpassword = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Password reset failed",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Password reset failed", error: error.message });
   }
 };
 
-// Export all functions
 module.exports = {
   login,
   login1,

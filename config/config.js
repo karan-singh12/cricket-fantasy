@@ -16,6 +16,14 @@ module.exports = {
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
     },
+    // MongoDB Configuration
+    mongo: {
+      uri: process.env.MONGO_URI || "mongodb://localhost:27017/fantasy_cricket_db",
+      options: {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+      },
+    },
     pool: {
       min: 2,
       max: 20,

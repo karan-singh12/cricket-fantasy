@@ -1,285 +1,261 @@
-const { knex: db } = require("../../config/database");
+const FantasyTeam = require("../../models/FantasyTeam");
+const User = require("../../models/User");
+const Match = require("../../models/Match");
+const Team = require("../../models/Team");
+const Player = require("../../models/Player");
 const apiResponse = require("../../utils/apiResponse");
-const { listing } = require("../../utils/functions");
-const { ERROR, FAQ, SUCCESS, FANTASYTTEAM } = require("../../utils/responseMsg");
+const { ERROR, SUCCESS, FANTASYTTEAM } = require("../../utils/responseMsg");
+const mongoose = require("mongoose");
 
 const teamManagerController = {
   async getAllFantasyTeams(req, res) {
     try {
       let { pageSize, pageNumber, searchItem = "" } = req.body;
-     
 
-      let query = db("fantasy_teams as ft")
-        .select(
-          "ft.id as fantasy_team_id",
-          "ft.name as fantasy_team_name",
-          "ft.total_points",
-          "ft.status as team_status",
-          "ft.match_id",
-          "ft.user_id",
-          "ft.created_at as created_at",
-          "u.name as user_name",
-          "u.email as user_email",
-          
-          "m.start_time as match_start_time",
-          "t1.short_name as team1_short_name",
-          "t2.short_name as team2_short_name"
-        )
-        .leftJoin("users as u", "ft.user_id", "u.id")
-        .leftJoin("matches as m", "ft.match_id", "m.id")
-        .leftJoin("teams as t1", "m.team1_id", "t1.id")
-        .leftJoin("teams as t2", "m.team2_id", "t2.id")
-        .where("u.is_bot", false)
+      const pipeline = [
+        {
+          $lookup: {
+            from: "users",
+            localField: "user",
+            foreignField: "_id",
+            as: "user_info",
+          },
+        },
+        { $unwind: "$user_info" },
+        { $match: { "user_info.is_bot": false } },
+        {
+          $lookup: {
+            from: "matches",
+            localField: "match",
+            foreignField: "_id",
+            as: "match_info",
+          },
+        },
+        { $unwind: { path: "$match_info", preserveNullAndEmptyArrays: true } },
+      ];
 
       if (searchItem) {
-        query = query.where(function () {
-          this.where("ft.name", "ilike", `%${searchItem}%`)
-            .orWhere("u.name", "ilike", `%${searchItem}%`)
-            .orWhere("u.email", "ilike", `%${searchItem}%`);
+        pipeline.push({
+          $match: {
+            $or: [
+              { name: { $regex: searchItem, $options: "i" } },
+              { "user_info.name": { $regex: searchItem, $options: "i" } },
+              { "user_info.email": { $regex: searchItem, $options: "i" } },
+            ],
+          },
         });
       }
 
-      const shouldPaginate = pageSize !== undefined && pageNumber !== undefined;
+      const totalResult = await FantasyTeam.aggregate([...pipeline, { $count: "total" }]);
+      const totalRecords = totalResult.length > 0 ? totalResult[0].total : 0;
 
+      const shouldPaginate = pageSize !== undefined && pageNumber !== undefined;
       if (shouldPaginate) {
         pageSize = parseInt(pageSize) || 10;
         pageNumber = parseInt(pageNumber) || 1;
-        const pageOffset = Math.max(0, pageNumber - 1);
-
-        const totalRecordsResult = await query
-          .clone()
-          .clearSelect()
-          .countDistinct("ft.id as count")
-          .first();
-        const totalRecords = parseInt(totalRecordsResult.count) || 0;
-
-        const result = await query.orderBy("ft.created_at", "desc")
-
-          .limit(pageSize)
-          .offset(pageSize * pageOffset);
-
-        const data = result;
-
-        return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
-          data,
-          totalRecords,
-          pageNumber,
-          pageSize,
-          totalPages: Math.ceil(totalRecords / pageSize),
-        });
+        const skip = (pageNumber - 1) * pageSize;
+        pipeline.push({ $sort: { created_at: -1 } });
+        pipeline.push({ $skip: skip });
+        pipeline.push({ $limit: pageSize });
       } else {
-        const result = await query;
-        return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
-          data: result,
-          totalRecords: result.length,
-          paginated: false,
-        });
+        pipeline.push({ $sort: { created_at: -1 } });
       }
+
+      const result = await FantasyTeam.aggregate(pipeline);
+
+      const formattedResult = await Promise.all(
+        result.map(async (ft) => {
+          let team1_short_name = "";
+          let team2_short_name = "";
+          if (ft.match_info) {
+            const t1 = await Team.findById(ft.match_info.team1).select("short_name").lean();
+            const t2 = await Team.findById(ft.match_info.team2).select("short_name").lean();
+            team1_short_name = t1?.short_name || "";
+            team2_short_name = t2?.short_name || "";
+          }
+
+          return {
+            fantasy_team_id: ft._id,
+            fantasy_team_name: ft.name,
+            total_points: ft.total_points,
+            team_status: ft.status || 1,
+            match_id: ft.match,
+            user_id: ft.user,
+            created_at: ft.created_at,
+            user_name: ft.user_info.name,
+            user_email: ft.user_info.email,
+            match_start_time: ft.match_info?.start_time,
+            team1_short_name,
+            team2_short_name,
+          };
+        })
+      );
+
+      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
+        data: formattedResult,
+        totalRecords,
+        pageNumber: shouldPaginate ? pageNumber : 1,
+        pageSize: shouldPaginate ? pageSize : formattedResult.length,
+        paginated: shouldPaginate,
+        totalPages: shouldPaginate ? Math.ceil(totalRecords / pageSize) : 1,
+      });
     } catch (error) {
       console.error("getAllFantasyTeams error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
+
   async getAllBotFantasyTeams(req, res) {
     try {
       let { pageSize, pageNumber, searchItem = "" } = req.body;
 
-      let query = db("fantasy_teams as ft")
-        .select(
-          "ft.id as fantasy_team_id",
-          "ft.name as fantasy_team_name",
-          "ft.total_points",
-          "ft.status as team_status",
-          "ft.match_id",
-          "ft.user_id",
-          "ft.created_at as created_at",
-          "u.name as user_name",
-          "u.email as user_email",
-          "u.is_bot as bot",
-          "m.start_time as match_start_time",
-          "t1.short_name as team1_short_name",
-          "t2.short_name as team2_short_name"
-        )
-        .leftJoin("users as u", "ft.user_id", "u.id")
-        .leftJoin("matches as m", "ft.match_id", "m.id")
-        .leftJoin("teams as t1", "m.team1_id", "t1.id")
-        .leftJoin("teams as t2", "m.team2_id", "t2.id")
-        .where("u.is_bot", true); // ✅ Only bot users
+      const pipeline = [
+        {
+          $lookup: {
+            from: "users",
+            localField: "user",
+            foreignField: "_id",
+            as: "user_info",
+          },
+        },
+        { $unwind: "$user_info" },
+        { $match: { "user_info.is_bot": true } },
+        {
+          $lookup: {
+            from: "matches",
+            localField: "match",
+            foreignField: "_id",
+            as: "match_info",
+          },
+        },
+        { $unwind: { path: "$match_info", preserveNullAndEmptyArrays: true } },
+      ];
 
       if (searchItem) {
-        query = query.where(function () {
-          this.where("ft.name", "ilike", `%${searchItem}%`)
-            .orWhere("u.name", "ilike", `%${searchItem}%`)
-            .orWhere("u.email", "ilike", `%${searchItem}%`);
+        pipeline.push({
+          $match: {
+            $or: [
+              { name: { $regex: searchItem, $options: "i" } },
+              { "user_info.name": { $regex: searchItem, $options: "i" } },
+              { "user_info.email": { $regex: searchItem, $options: "i" } },
+            ],
+          },
         });
       }
 
-      const shouldPaginate = pageSize !== undefined && pageNumber !== undefined;
+      const totalResult = await FantasyTeam.aggregate([...pipeline, { $count: "total" }]);
+      const totalRecords = totalResult.length > 0 ? totalResult[0].total : 0;
 
+      const shouldPaginate = pageSize !== undefined && pageNumber !== undefined;
       if (shouldPaginate) {
         pageSize = parseInt(pageSize) || 10;
         pageNumber = parseInt(pageNumber) || 1;
-        const pageOffset = Math.max(0, pageNumber - 1);
-
-        const totalRecordsResult = await query
-          .clone()
-          .clearSelect()
-          .countDistinct("ft.id as count")
-          .first();
-        const totalRecords = parseInt(totalRecordsResult.count) || 0;
-
-        const result = await query.orderBy("ft.created_at", "desc")
-          .limit(pageSize)
-          .offset(pageSize * pageOffset);
-
-        return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
-          data: result,
-          totalRecords,
-          pageNumber,
-          pageSize,
-          totalPages: Math.ceil(totalRecords / pageSize),
-        });
+        const skip = (pageNumber - 1) * pageSize;
+        pipeline.push({ $sort: { created_at: -1 } });
+        pipeline.push({ $skip: skip });
+        pipeline.push({ $limit: pageSize });
       } else {
-        const result = await query;
-        return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
-          data: result,
-          totalRecords: result.length,
-          paginated: false,
-        });
+        pipeline.push({ $sort: { created_at: -1 } });
       }
+
+      const result = await FantasyTeam.aggregate(pipeline);
+
+      const formattedResult = await Promise.all(
+        result.map(async (ft) => {
+          let team1_short_name = "";
+          let team2_short_name = "";
+          if (ft.match_info) {
+            const t1 = await Team.findById(ft.match_info.team1).select("short_name").lean();
+            const t2 = await Team.findById(ft.match_info.team2).select("short_name").lean();
+            team1_short_name = t1?.short_name || "";
+            team2_short_name = t2?.short_name || "";
+          }
+
+          return {
+            fantasy_team_id: ft._id,
+            fantasy_team_name: ft.name,
+            total_points: ft.total_points,
+            team_status: ft.status || 1,
+            match_id: ft.match,
+            user_id: ft.user,
+            created_at: ft.created_at,
+            user_name: ft.user_info.name,
+            user_email: ft.user_info.email,
+            match_start_time: ft.match_info?.start_time,
+            team1_short_name,
+            team2_short_name,
+          };
+        })
+      );
+
+      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
+        data: formattedResult,
+        totalRecords,
+        pageNumber: shouldPaginate ? pageNumber : 1,
+        pageSize: shouldPaginate ? pageSize : formattedResult.length,
+        paginated: shouldPaginate,
+        totalPages: shouldPaginate ? Math.ceil(totalRecords / pageSize) : 1,
+      });
     } catch (error) {
       console.error("getAllBotFantasyTeams error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
 
-  
-
-  // async getFantasyTeamById(req, res) {
-  //   try {
-  //     const { id } = req.params;
-  //     if (!id) {
-  //       return apiResponse.ErrorResponse(res, FANTASYTTEAM.fantasyTeamIdRequired);
-  //     }
-
-  //     const team = await db("fantasy_teams as ft")
-  //       .select(
-  //         "ft.id as fantasy_team_id",
-  //         "ft.name as fantasy_team_name",
-  //         "ft.total_points",
-  //         "ft.status as team_status",
-  //         "ft.match_id",
-  //         "ft.user_id",
-  //         "u.name as user_name",
-  //         "u.email as user_email",
-  //         "m.start_time as match_start_time",
-  //         "t1.short_name as team1_short_name",
-  //         "t2.short_name as team2_short_name"
-  //       )
-  //       .leftJoin("users as u", "ft.user_id", "u.id")
-  //       .leftJoin("matches as m", "ft.match_id", "m.id")
-  //       .leftJoin("teams as t1", "m.team1_id", "t1.id")
-  //       .leftJoin("teams as t2", "m.team2_id", "t2.id")
-  //       .where("ft.id", id)
-  //       .first();
-  //     if (!team) {
-  //       return apiResponse.ErrorResponse(res, FANTASYTTEAM.fantasyTeamNotFound);
-  //     }
-
-  //     const players = await db("fantasy_team_players as ftp")
-  //       .select(
-  //         "ftp.player_id",
-  //         "ftp.is_captain",
-  //         "ftp.is_vice_captain",
-  //         "ftp.substitute",
-  //         "p.name as player_name",
-  //         "p.role as player_role",
-  //         "pt.team_id as player_team_id",
-  //         "t.name as player_team_name",
-  //         "t.short_name as player_team_short_name",
-  //         db.raw("COALESCE(p.metadata->>'image_path', null) as image_path")
-  //       )
-  //       .join("players as p", "ftp.player_id", "p.id")
-  //       .leftJoin("player_teams as pt", "p.id", "pt.player_id")
-  //       .leftJoin("teams as t", "pt.team_id", "t.id")
-  //       .where("ftp.fantasy_team_id", id)
-  //       .orderBy("ftp.substitute", "asc")
-  //       .orderBy("ftp.id", "asc");
-  //     return apiResponse.successResponseWithData(
-  //       res,
-  //       FANTASYTTEAM.fantasyTeamsFetchedSuccessfully,
-  //       {
-  //         ...team,
-  //         players,
-  //       }
-  //     );
-  //   } catch (error) {
-  //     console.error("getFantasyTeamById error:", error);
-  //     return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-  //   }
-  // },
   async getFantasyTeamById(req, res) {
     try {
       const { id } = req.params;
       if (!id) {
         return apiResponse.ErrorResponse(res, FANTASYTTEAM.fantasyTeamIdRequired);
       }
-  
-      const team = await db("fantasy_teams as ft")
-        .select(
-          "ft.id as fantasy_team_id",
-          "ft.name as fantasy_team_name",
-          "ft.total_points",
-          "ft.status as team_status",
-          "ft.match_id",
-          "ft.user_id",
-          "ft.contest_id",
-          "u.name as user_name",
-          "u.email as user_email",
-          "m.start_time as match_start_time",
-          "t1.short_name as team1_short_name",
-          "t2.short_name as team2_short_name"
-        )
-        .leftJoin("users as u", "ft.user_id", "u.id")
-        .leftJoin("matches as m", "ft.match_id", "m.id")
-        .leftJoin("teams as t1", "m.team1_id", "t1.id")
-        .leftJoin("teams as t2", "m.team2_id", "t2.id")
-        .where("ft.id", id)
-        .first();
-      
+
+      const team = await FantasyTeam.findById(id)
+        .populate("user", "name email")
+        .populate("match")
+        .populate("players.player")
+        .lean();
+
       if (!team) {
         return apiResponse.ErrorResponse(res, FANTASYTTEAM.fantasyTeamNotFound);
       }
-  
-      // For PostgreSQL, use DISTINCT ON to get only one team per player for this match
-      const players = await db("fantasy_team_players as ftp")
-  .distinctOn("ftp.player_id")
-  .select(
-    "ftp.player_id",
-    "ftp.is_captain",
-    "ftp.is_vice_captain",
-    "ftp.substitute",
-    "p.name as player_name",
-    "p.role as player_role",
-    "pt.team_id as player_team_id",
-    "t.name as player_team_name",
-    "t.short_name as player_team_short_name",
-    db.raw("COALESCE(p.metadata->>'image_path', null) as image_path")
-  )
-  .join("players as p", "ftp.player_id", "p.id")
-  .leftJoin("player_teams as pt", "p.id", "pt.player_id") // <-- removed match_id filter
-  .leftJoin("teams as t", "pt.team_id", "t.id")
-  .where("ftp.fantasy_team_id", id)
-  .orderBy("ftp.player_id")
-  .orderBy("ftp.substitute", "asc")
-  .orderBy("ftp.id", "asc");
-  
+
+      let team1_short_name = "";
+      let team2_short_name = "";
+
+      if (team.match) {
+        const t1 = await Team.findById(team.match.team1).select("short_name").lean();
+        const t2 = await Team.findById(team.match.team2).select("short_name").lean();
+        team1_short_name = t1?.short_name || "";
+        team2_short_name = t2?.short_name || "";
+      }
+
+      const formattedPlayers = team.players.map((p) => ({
+        player_id: p.player?.sportmonks_id,
+        player_name: p.player?.name,
+        player_role: p.player?.role,
+        is_captain: p.is_captain,
+        is_vice_captain: p.is_vice_captain,
+        substitute: p.is_substitute ? 1 : 0,
+        image_path: p.player?.image_url || null,
+        // player_team info might need additional lookup if not embedded in Player
+      }));
+
       return apiResponse.successResponseWithData(
         res,
         FANTASYTTEAM.fantasyTeamsFetchedSuccessfully,
         {
-          ...team,
-          players,
+          fantasy_team_id: team._id,
+          fantasy_team_name: team.name,
+          total_points: team.total_points,
+          team_status: team.status || 1,
+          match_id: team.match?._id,
+          user_id: team.user?._id,
+          user_name: team.user?.name,
+          user_email: team.user?.email,
+          match_start_time: team.match?.start_time,
+          team1_short_name,
+          team2_short_name,
+          players: formattedPlayers,
         }
       );
     } catch (error) {
