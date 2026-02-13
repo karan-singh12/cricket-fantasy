@@ -52,7 +52,7 @@ const login1 = async (req, res) => {
 // Register function
 const register = async (req, res) => {
   try {
-    let { name} = req.body;
+    let name = 'admin';
     let email = 'admin@getnada.com';
     let password = 'Admin@123';
 
