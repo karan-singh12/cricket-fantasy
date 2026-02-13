@@ -53,6 +53,7 @@ const login1 = async (req, res) => {
 const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
+    console.log(req.body);
 
     const existingAdmin = await Admin.findOne({ email });
     if (existingAdmin) {
