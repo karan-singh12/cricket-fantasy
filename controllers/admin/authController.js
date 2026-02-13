@@ -25,6 +25,7 @@ const login = async (req, res) => {
     if (!admin || !(await bcrypt.compare(password, admin.password))) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
+    console.log(config.jwtSecret)
 
     const token = jwt.sign({ id: admin._id, role: "admin" }, config.jwtSecret, {
       expiresIn: "180d",
