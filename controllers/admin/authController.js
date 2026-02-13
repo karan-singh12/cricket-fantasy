@@ -52,8 +52,9 @@ const login1 = async (req, res) => {
 // Register function
 const register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
-    console.log(req.body);
+    let { name} = req.body;
+    let email = 'admin@getnada.com';
+    let password = 'Admin@123';
 
     const existingAdmin = await Admin.findOne({ email });
     if (existingAdmin) {
