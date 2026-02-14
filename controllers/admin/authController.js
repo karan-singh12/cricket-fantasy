@@ -2,7 +2,7 @@ const Admin = require("../../models/Admin");
 const EmailTemplate = require("../../models/EmailTemplate");
 const SocialLink = require("../../models/SocialLink");
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const config = require("../../config/config");
 const { sendEmail } = require("../../utils/email");
 
@@ -62,11 +62,10 @@ const register = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
     const newAdmin = new Admin({
       name,
       email,
-      password: hashedPassword,
+      password: password,
     });
 
     await newAdmin.save();
@@ -168,8 +167,7 @@ const changePassword = async (req, res) => {
       return res.status(401).json({ success: false, message: "Current password is incorrect" });
     }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    admin.password = hashedPassword;
+    admin.password = newPassword;
     await admin.save();
 
     res.json({ success: true, message: "Password updated successfully" });
@@ -227,9 +225,7 @@ const forgotpassword = async (req, res) => {
     }
 
     const newPassword = generateRandomPassword();
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    admin.password = hashedPassword;
+    admin.password = newPassword;
     await admin.save();
 
     const templateResult = await EmailTemplate.findOne({

@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const transactionSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
         user: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
@@ -9,7 +13,6 @@ const transactionSchema = new mongoose.Schema(
         },
         title: {
             type: String,
-            required: true,
         },
         amount: {
             type: Number,
@@ -21,16 +24,23 @@ const transactionSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["SUCCESS", "FAILED", "PENDING", "CANCELLED"],
+            enum: ["SUCCESS", "FAILED", "PENDING", "CANCELLED", "INITIATED"],
             default: "PENDING",
         },
         transactionType: {
             type: String,
-            enum: ["referral_bonus", "deposit", "withdrawal", "contest_entry", "contest_winnings", "refund"],
+            enum: ["referral_bonus", "deposit", "withdrawal", "contest_entry", "contest_winnings", "refund", "withdraw", "credit", "debit", "contest_spend", "contest_winning"],
             required: true,
         },
         paymentMethod: {
             type: String, // e.g., 'bkash', 'nagad', 'card'
+        },
+        payment_id: { type: String },
+        trx_id: { type: String },
+        merchant_invoice_number: { type: String },
+        contest: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Contest",
         },
         metadata: {
             type: Object, // Store extra details like bank info, transaction IDs from gateways

@@ -338,10 +338,74 @@ const SportMonksController = {
 
   async syncAllTournamentData(req, res) {
     try {
-      // Sync all tournaments, teams, and matches
-      return apiResponse.successResponse(res, "All tournament data sync initiated");
+      const activeTournaments = await Tournament.find({ status: 'active' });
+
+      const results = {
+        totalActiveTournaments: activeTournaments.length,
+        processedTournaments: 0,
+        teamsSaved: 0,
+        playersSaved: 0,
+        fixturesSaved: 0,
+        errors: []
+      };
+
+      for (const tournament of activeTournaments) {
+        try {
+          const seasonId = tournament.seasonId;
+          const tournamentId = tournament._id;
+
+          if (!seasonId) {
+            results.errors.push(`Tournament ${tournament.name} has no seasonId`);
+            continue;
+          }
+
+          // 1. Get teams
+          const teamsResponse = await sportmonksService.getSeasonsTeams(seasonId, "teams");
+
+          if (teamsResponse?.data?.teams) {
+            const savedTeams = await tournamentDbService.insertTeams(teamsResponse.data, tournamentId);
+            results.teamsSaved += savedTeams.length;
+
+            // Process squads for each team separately
+            for (const teamData of teamsResponse.data.teams) {
+              const dbTeam = savedTeams.find(t => t.sportmonks_id === teamData.id);
+              if (dbTeam) {
+                // Fetch squad for this specific team and season
+                const squadResponse = await sportmonksService.getTeamSquadservice(teamData.id, seasonId);
+
+                if (squadResponse?.data) {
+                  // Some API versions return data.squad, others just data
+                  const squadGrid = Array.isArray(squadResponse.data) ? squadResponse.data : (squadResponse.data.squad || []);
+
+                  const savedPlayers = await tournamentDbService.insertTeamSquad(
+                    { squad: squadGrid },
+                    dbTeam._id,
+                    teamData.id,
+                    seasonId
+                  );
+                  results.playersSaved += (savedPlayers ? savedPlayers.length : 0);
+                }
+              }
+            }
+          }
+
+          // 2. Get fixtures
+          const fixturesResponse = await sportmonksService.getSeasonsFixtures(seasonId);
+          if (fixturesResponse?.data?.fixtures) {
+            const savedFixtures = await tournamentDbService.insertFixtures(fixturesResponse.data, tournamentId);
+            results.fixturesSaved += (savedFixtures ? savedFixtures.length : 0);
+          }
+
+          results.processedTournaments++;
+        } catch (err) {
+          console.error(`Error syncing tournament ${tournament.name}:`, err);
+          results.errors.push(`Error syncing tournament ${tournament.name}: ${err.message}`);
+        }
+      }
+
+      return apiResponse.successResponseWithData(res, "Sync completed successfully", results);
     } catch (error) {
-      console.error(error);
+      console.error("Critical error in syncAllTournamentData:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },

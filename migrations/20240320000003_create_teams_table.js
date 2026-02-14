@@ -4,7 +4,9 @@ exports.up = function (knex) {
         table.string('name').notNullable();
         table.string('short_name');
         table.string('logo_url');
-        table.string('country');
+        table.string('type'); // 'national', 'club'
+        table.integer('country_id');
+        table.integer('sportmonks_id').unique();
         table.integer('tournament_id').references('id').inTable('tournaments');
         table.jsonb('metadata');
         table.timestamp('created_at').defaultTo(knex.fn.now());

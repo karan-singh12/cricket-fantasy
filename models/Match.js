@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const matchSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
         sportmonks_id: {
             type: Number,
             required: true,
@@ -29,6 +33,9 @@ const matchSchema = new mongoose.Schema(
             type: Date,
             required: true,
         },
+        end_time: {
+            type: Date,
+        },
         status: {
             type: String, // 'NS', '1st Innings', '2nd Innings', 'Completed'
         },
@@ -37,6 +44,21 @@ const matchSchema = new mongoose.Schema(
         },
         venue_id: {
             type: Number,
+        },
+        venue: {
+            type: String,
+        },
+        city: {
+            type: String,
+        },
+        country: {
+            type: String,
+        },
+        match_number: {
+            type: String,
+        },
+        match_type: {
+            type: String,
         },
         toss_won_team_id: {
             type: Number,
@@ -65,6 +87,24 @@ const matchSchema = new mongoose.Schema(
         result_note: {
             type: String,
         },
+        toss: {
+            type: String,
+        },
+        man_of_match: {
+            type: String,
+        },
+        referee: {
+            type: String,
+        },
+        scorecard: {
+            type: Object,
+        },
+        metadata: {
+            type: Object,
+        },
+        sm_match_id: {
+            type: Number,
+        }
     },
     {
         timestamps: { createdAt: "created_at", updatedAt: "updated_at" },

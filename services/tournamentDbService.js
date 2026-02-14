@@ -15,17 +15,21 @@ const insertTournaments = async (data) => {
     const results = [];
     for (let league of data) {
       const tournamentData = {
+        id: league.id,
         name: league.name,
         sportmonks_id: league.id,
-        status: league.status || 'active',
+        status: league.status || "active",
         // metadata: league, // removed to keep DB clean, but can add if needed
         updated_at: new Date(),
+        seasonId: league.season_id,
+        type: league.type,
+        season: league.season.name,
       };
 
       const tournament = await Tournament.findOneAndUpdate(
         { sportmonks_id: league.id },
         { $set: tournamentData },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
       );
       results.push(tournament);
     }
@@ -43,6 +47,7 @@ const insertTeams = async (seasonData, tournamentId) => {
 
     for (const team of teams) {
       const teamData = {
+        id: team.id,
         name: team.name,
         sportmonks_id: team.id,
         short_name: team.code,
@@ -55,7 +60,7 @@ const insertTeams = async (seasonData, tournamentId) => {
       const savedTeam = await Team.findOneAndUpdate(
         { sportmonks_id: team.id },
         { $set: teamData },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
       );
       result.push(savedTeam);
     }
@@ -82,6 +87,7 @@ const insertFixtures = async (seasonData, tournamentId) => {
       }
 
       const matchData = {
+        id: fixture.id,
         tournament: tournamentId,
         sportmonks_id: fixture.id,
         team1: localTeam._id,
@@ -101,7 +107,7 @@ const insertFixtures = async (seasonData, tournamentId) => {
       const savedMatch = await Match.findOneAndUpdate(
         { sportmonks_id: fixture.id },
         { $set: matchData },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
       );
       result.push(savedMatch);
     }
@@ -118,22 +124,28 @@ const insertTeamSquad = async (teamData, teamDbId, teamSmId, seasonId) => {
     const squad = teamData.squad;
     const result = [];
 
-    for (const player of squad) {
+    for (const squadMember of squad) {
+      const player = squadMember.player || squadMember; // Handle cases where player is nested or not
       const playerData = {
-        name: player.fullname,
+        id: player.id,
+        name: player.fullname || player.name,
         sportmonks_id: player.id,
-        role: player.position?.name || null,
+        short_name: player.short_code || player.common_name || null,
+        role: player.position?.name || squadMember.position?.name || null,
+        position: player.position?.name || squadMember.position?.name || null,
         batting_style: player.battingstyle || null,
         bowling_style: player.bowlingstyle || null,
         date_of_birth: player.dateofbirth || null,
         image_url: player.image_path,
+        nationality: player.nationality?.name || null,
+        country_id: player.country_id || null,
         updated_at: new Date(),
       };
 
       const savedPlayer = await Player.findOneAndUpdate(
         { sportmonks_id: player.id },
         { $set: playerData },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
       );
 
       // Create/Update PlayerTeam relation

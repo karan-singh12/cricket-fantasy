@@ -2,13 +2,25 @@ const mongoose = require("mongoose");
 
 const contestSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
+        name: {
+            type: String,
+            required: true,
+        },
         match: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Match",
             required: true,
         },
+        tournament: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Tournament",
+        },
         template_id: {
-            type: Number, // Reference to contest template
+            type: Number,
         },
         entry_fee: {
             type: Number,
@@ -36,6 +48,19 @@ const contestSchema = new mongoose.Schema(
         winnings: {
             type: Object, // Prize distribution structure { "1": 500, "2": 300 }
         },
+        commission_percentage: {
+            type: Number,
+        },
+        total_spots: {
+            type: Number,
+        },
+        per_user_entry: {
+            type: Number,
+        },
+        filled_spots: {
+            type: Number,
+            default: 0,
+        },
         status: {
             type: String,
             enum: ["upcoming", "cancelled", "completed", "live"],
@@ -56,7 +81,7 @@ const contestSchema = new mongoose.Schema(
             type: Date,
         },
         rules: {
-            type: String, // or Object for prize breakup text
+            type: String,
         },
     },
     {

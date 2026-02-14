@@ -68,9 +68,9 @@ class SportMonksService {
         `Error fetching seasons for league ${seasonId}:`,
         error.response?.data || error.message
       );
+      const errorMessage = error.response?.data?.message || error.message;
       throw new Error(
-        `Failed to fetch seasons: ${error.response?.data?.message || error.message
-        }`
+        `Failed to fetch seasons: ${typeof errorMessage === 'object' ? JSON.stringify(errorMessage) : errorMessage}`
       );
     }
   }

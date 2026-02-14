@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const tournamentSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
         name: {
             type: String,
             required: true,
@@ -22,6 +26,12 @@ const tournamentSchema = new mongoose.Schema(
         },
         type: {
             type: String, // 'league', 'cup'
+        },
+        seasonId: {
+            type: Number,
+        },
+        season: {
+            type: String, // e.g., '2023/24'
         },
         status: {
             type: String, // 'active', 'completed'

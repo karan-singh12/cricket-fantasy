@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const playerTeamSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
         player: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Player",

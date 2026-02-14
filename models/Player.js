@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const playerSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
         sportmonks_id: {
             type: Number,
             required: true,

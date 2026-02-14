@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const notificationSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
         user: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
@@ -23,9 +27,15 @@ const notificationSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+        match_id: {
+            type: Number,
+        },
         sent_at: {
             type: Date,
             default: Date.now,
+        },
+        read_at: {
+            type: Date,
         },
     },
     {
