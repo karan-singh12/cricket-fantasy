@@ -2,13 +2,17 @@ const mongoose = require("mongoose");
 
 const fantasyTeamSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
         user: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
             required: true,
         },
         match: {
-            type: mongoose.Schema.Types.ObjectId, // Or Number if using Sportmonks ID
+            type: mongoose.Schema.Types.ObjectId,
             ref: "Match",
             required: true,
         },
@@ -33,7 +37,7 @@ const fantasyTeamSchema = new mongoose.Schema(
                 },
                 is_captain: { type: Boolean, default: false },
                 is_vice_captain: { type: Boolean, default: false },
-                is_substitute: { type: Boolean, default: false }, // Added for consistency with controller usage
+                is_substitute: { type: Boolean, default: false },
             },
         ],
         total_points: {
@@ -45,6 +49,38 @@ const fantasyTeamSchema = new mongoose.Schema(
         timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
     }
 );
+
+// Transform to return numeric id and hide _id
+fantasyTeamSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+fantasyTeamSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+// Auto-increment numeric id
+const Counter = require("./Counter");
+fantasyTeamSchema.pre("save", async function () {
+    if (!this.id) {
+        const counter = await Counter.findByIdAndUpdate(
+            { _id: "fantasyTeamId" },
+            { $inc: { seq: 1 } },
+            { returnDocument: 'after', upsert: true }
+        );
+        this.id = counter.seq;
+    }
+});
 
 const FantasyTeam = mongoose.model("FantasyTeam", fantasyTeamSchema);
 

@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const bannerSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
         name: {
             type: String,
             required: true,
@@ -35,6 +39,38 @@ const bannerSchema = new mongoose.Schema(
         timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
     }
 );
+
+// Transform to return numeric id and hide _id
+bannerSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+bannerSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+// Auto-increment numeric id
+const Counter = require("./Counter");
+bannerSchema.pre("save", async function () {
+    if (!this.id) {
+        const counter = await Counter.findByIdAndUpdate(
+            { _id: "bannerId" },
+            { $inc: { seq: 1 } },
+            { returnDocument: 'after', upsert: true }
+        );
+        this.id = counter.seq;
+    }
+});
 
 const Banner = mongoose.model("Banner", bannerSchema);
 

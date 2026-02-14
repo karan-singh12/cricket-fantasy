@@ -51,6 +51,38 @@ const transactionSchema = new mongoose.Schema(
     }
 );
 
+// Transform to return numeric id and hide _id
+transactionSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+transactionSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+// Auto-increment numeric id
+const Counter = require("./Counter");
+transactionSchema.pre("save", async function () {
+    if (!this.id) {
+        const counter = await Counter.findByIdAndUpdate(
+            { _id: "transactionId" },
+            { $inc: { seq: 1 } },
+            { returnDocument: 'after', upsert: true }
+        );
+        this.id = counter.seq;
+    }
+});
+
 const Transaction = mongoose.model("Transaction", transactionSchema);
 
 module.exports = Transaction;

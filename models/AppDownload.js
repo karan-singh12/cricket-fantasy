@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const appDownloadSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
         file_name: {
             type: String,
             required: true,
@@ -31,6 +35,38 @@ const appDownloadSchema = new mongoose.Schema(
         timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
     }
 );
+
+// Transform to return numeric id and hide _id
+appDownloadSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+appDownloadSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+// Auto-increment numeric id
+const Counter = require("./Counter");
+appDownloadSchema.pre("save", async function () {
+    if (!this.id) {
+        const counter = await Counter.findByIdAndUpdate(
+            { _id: "appDownloadId" },
+            { $inc: { seq: 1 } },
+            { returnDocument: 'after', upsert: true }
+        );
+        this.id = counter.seq;
+    }
+});
 
 const AppDownload = mongoose.model("AppDownload", appDownloadSchema);
 

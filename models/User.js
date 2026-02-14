@@ -101,8 +101,39 @@ const userSchema = new mongoose.Schema(
     }
 );
 
-// Hash password before saving
+// Transform to return numeric id and hide _id/password
+userSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        delete ret.password;
+        return ret;
+    },
+});
+
+userSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        delete ret.password;
+        return ret;
+    },
+});
+
+// Auto-increment numeric id
+const Counter = require("./Counter");
 userSchema.pre("save", async function () {
+    if (!this.id) {
+        const counter = await Counter.findByIdAndUpdate(
+            { _id: "userId" },
+            { $inc: { seq: 1 } },
+            { returnDocument: 'after', upsert: true }
+        );
+        this.id = counter.seq;
+    }
+
     if (!this.isModified("password")) return;
     this.password = await bcrypt.hash(this.password, 10);
 });

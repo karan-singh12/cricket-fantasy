@@ -42,8 +42,39 @@ const adminSchema = new mongoose.Schema(
     }
 );
 
-// Hash password before saving
+// Transform to return numeric id and hide _id/password
+adminSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        delete ret.password;
+        return ret;
+    },
+});
+
+adminSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        delete ret.password;
+        return ret;
+    },
+});
+
+// Auto-increment numeric id
+const Counter = require("./Counter");
 adminSchema.pre("save", async function () {
+    if (!this.id) {
+        const counter = await Counter.findByIdAndUpdate(
+            { _id: "adminId" },
+            { $inc: { seq: 1 } },
+            { returnDocument: 'after', upsert: true }
+        );
+        this.id = counter.seq;
+    }
+
     if (!this.isModified("password")) return;
     this.password = await bcrypt.hash(this.password, 10);
 });

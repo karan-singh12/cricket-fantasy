@@ -42,6 +42,25 @@ const tournamentSchema = new mongoose.Schema(
     }
 );
 
+// Transform to return numeric id and hide _id
+tournamentSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+tournamentSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
 const Tournament = mongoose.model("Tournament", tournamentSchema);
 
 module.exports = Tournament;

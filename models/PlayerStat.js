@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 
 const playerStatSchema = new mongoose.Schema(
     {
+        id: {
+            type: Number,
+            unique: true,
+        },
         match: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Match",
@@ -49,6 +53,38 @@ const playerStatSchema = new mongoose.Schema(
         timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
     }
 );
+
+// Transform to return numeric id and hide _id
+playerStatSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+playerStatSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+// Auto-increment numeric id
+const Counter = require("./Counter");
+playerStatSchema.pre("save", async function () {
+    if (!this.id) {
+        const counter = await Counter.findByIdAndUpdate(
+            { _id: "playerStatId" },
+            { $inc: { seq: 1 } },
+            { returnDocument: 'after', upsert: true }
+        );
+        this.id = counter.seq;
+    }
+});
 
 // Compound index
 playerStatSchema.index({ match: 1, player: 1 }, { unique: true });

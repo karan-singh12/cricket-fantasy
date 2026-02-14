@@ -111,6 +111,25 @@ const matchSchema = new mongoose.Schema(
     }
 );
 
+// Transform to return numeric id and hide _id
+matchSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+matchSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
 const Match = mongoose.model("Match", matchSchema);
 
 module.exports = Match;

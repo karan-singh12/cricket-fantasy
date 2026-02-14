@@ -50,6 +50,25 @@ const playerSchema = new mongoose.Schema(
     }
 );
 
+// Transform to return numeric id and hide _id
+playerSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+playerSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
 const Player = mongoose.model("Player", playerSchema);
 
 module.exports = Player;

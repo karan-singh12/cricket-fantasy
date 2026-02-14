@@ -82,6 +82,8 @@ const SportMonksController = {
     try {
       const { teamId, seasonId, tournamentId } = req.body;
 
+
+
       const dbTeam = await Team.findOne({ sportmonks_id: teamId });
       if (!dbTeam) {
         return apiResponse.ErrorResponse(res, "Team not found in database");
@@ -437,7 +439,57 @@ const SportMonksController = {
       console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
-  }
+  },
+
+  async syncTeamsSquadsBySeason(req, res) {
+    try {
+      const seasonId = 1715;
+      if (!seasonId) return apiResponse.ErrorResponse(res, "seasonId is required");
+
+      const teams = await Team.find().lean();
+      const results = {
+        totalTeams: teams.length,
+        synced: 0,
+        failed: 0,
+        errors: []
+      };
+
+      for (const team of teams) {
+        try {
+          const response = await sportmonksService.getTeamSquadservice(team.sportmonks_id, seasonId);
+          if (response?.data?.squad?.length) {
+            await tournamentDbService.insertTeamSquad(
+              response.data,
+              team._id,
+              team.sportmonks_id,
+              seasonId
+            );
+            results.synced++;
+          } else {
+            results.failed++;
+            results.errors.push(`Team ${team.name} has no squad for season ${seasonId}`);
+          }
+        } catch (err) {
+          results.failed++;
+          results.errors.push(`Team ${team.name} (${team.sportmonks_id}) failed: ${err.message}`);
+        }
+      }
+
+      return apiResponse.successResponseWithData(res, "Bulk squad sync completed", results);
+    } catch (error) {
+      console.error("Bulk sync error:", error);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
+  async getAllTeams(req, res) {
+    try {
+      const teams = await Team.find().sort({ name: 1 }).lean();
+      return apiResponse.successResponseWithData(res, "Teams fetched successfully", teams);
+    } catch (error) {
+      console.error("Error in getAllTeams:", error);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
 };
 
 module.exports = SportMonksController;

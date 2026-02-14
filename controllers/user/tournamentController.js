@@ -9,6 +9,7 @@ const tournamentController = {
   // Get all tournaments
   async getAllTournaments(req, res) {
     try {
+      console.log("req.user", req.user);
       const today = moment().startOf("day").toDate();
       const oneMonthLater = moment().add(1, "months").endOf("day").toDate();
 
@@ -20,43 +21,16 @@ const tournamentController = {
       // Filter tournaments that have upcoming matches in the next month
       // Note: Replicating the exact "player_teams" check might be complex here, 
       // focusing on tournaments with valid upcoming matches for now.
-      const tournamentIdsWithMatches = await Match.distinct("tournament", {
-        status: "NS",
-        start_time: { $gte: today, $lte: oneMonthLater }
-      });
+      // const tournamentIdsWithMatches = await Match.distinct("tournament", {
+      //   status: "NS",
+      //   start_time: { $gte: today, $lte: oneMonthLater }
+      // });
 
-      const filteredTournaments = tournaments.filter(t =>
-        tournamentIdsWithMatches.some(id => id.toString() === t._id.toString())
-      );
+      // const filteredTournaments = tournaments.filter(t =>
+      //   tournamentIdsWithMatches.some(id => id.toString() === t._id.toString())
+      // );
 
-      // Translation logic (mirroring original)
-      const { getLanguage } = require("../../utils/responseMsg");
-      const { translateTo } = require("../../utils/google");
-
-      const lang = (getLanguage() || "en").toLowerCase() === "hn" ? "hi" : (getLanguage() || "en").toLowerCase();
-
-      const translatedTournaments = await Promise.all(
-        filteredTournaments.map(async (t) => {
-          const translatedName = await translateTo(t.name, lang);
-          let translatedMetadata = t.metadata || {};
-
-          if (translatedMetadata && typeof translatedMetadata === "object" && translatedMetadata.name) {
-            translatedMetadata = {
-              ...translatedMetadata,
-              name: await translateTo(translatedMetadata.name, lang),
-            };
-          }
-
-          return {
-            ...t,
-            id: t._id,
-            name: translatedName,
-            metadata: translatedMetadata,
-          };
-        })
-      );
-
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, translatedTournaments);
+      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, tournaments);
     } catch (error) {
       console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);

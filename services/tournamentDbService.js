@@ -151,8 +151,13 @@ const insertTeamSquad = async (teamData, teamDbId, teamSmId, seasonId) => {
       // Create/Update PlayerTeam relation
       await PlayerTeam.findOneAndUpdate(
         { player: savedPlayer._id, team: teamDbId, season_id: seasonId },
-        { $set: { updated_at: new Date() } },
-        { upsert: true }
+        {
+          $set: {
+            id: squadMember.id || Number(`${player.id}${teamSmId}`), // Use relationship ID or combine IDs
+            updated_at: new Date()
+          }
+        },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
       );
 
       result.push(savedPlayer);

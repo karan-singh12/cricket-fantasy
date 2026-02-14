@@ -35,6 +35,25 @@ const teamSchema = new mongoose.Schema(
     }
 );
 
+// Transform to return numeric id and hide _id
+teamSchema.set("toJSON", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
+teamSchema.set("toObject", {
+    virtuals: true,
+    versionKey: false,
+    transform: function (doc, ret) {
+        delete ret._id;
+        return ret;
+    },
+});
+
 const Team = mongoose.model("Team", teamSchema);
 
 module.exports = Team;

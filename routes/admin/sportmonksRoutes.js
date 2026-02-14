@@ -45,6 +45,8 @@ router.get("/players/:playerId", auth, fxn.getPlayerDetails);
 router.get("/syncAllTournamentData", auth, fxn.syncAllTournamentData);
 router.get("/syncAllTournamentData2", auth, fxn.syncAllTournamentData2);
 router.get("/syncAllTournamentTeams", auth, fxn.syncAllTournamentTeams);
+router.post("/syncTeamsSquadsBySeason", auth, fxn.syncTeamsSquadsBySeason);
+router.get("/db-teams", auth, fxn.getAllTeams);
 
 router.post("/completeContest/:contestId", auth, fxn.completeContestManually);
 
