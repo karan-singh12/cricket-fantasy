@@ -1,5 +1,5 @@
 const { invalid } = require("joi");
-
+const { knex: db } = require("../config/database");
 
 const staticTranslations = {
   en: {
@@ -49,7 +49,7 @@ const staticTranslations = {
       emailAlreadyInUse: "Email already in use",
       phoneAlreadyInUse: "Phone already in use",
       noFieldsToUpdate: "No fields to update",
-      accountInactive: "Account inactive or deleted."
+      accountInactive:"Account inactive or deleted."
     },
     SUCCESS: {
       dataFound: "Data found.",
@@ -63,9 +63,9 @@ const staticTranslations = {
       userDeleted: "Your account has been deleted by admin.",
     },
     USER: {
-
+     
       phoneExists: "Phone number already exists.",
-      DTOKNUPDATED: "Device token updated successfully",
+      DTOKNUPDATED:"Device token updated successfully",
       missingRequiredFields: "Missing required fields: id and status",
       userAlreadyExists: "User already exists",
       invalidStatusValue: "Invalid status value",
@@ -74,7 +74,7 @@ const staticTranslations = {
       userNotFound: "User not found",
       userNotDeleted: "User not found or not deleted",
       userIDrequired: "User ID is required",
-      referralCodeAdded: "Referral Code Added",
+      referralCodeAdded:"Referral Code Added",
       emailGoogleIdSocialLoginTypeRequired:
         "Email, googleId, and socialLoginType are required",
       emailOrPhoneRequired: "Email or phone is required",
@@ -385,7 +385,7 @@ const staticTranslations = {
         "Team not found or already submitted",
       backupPlayersAddedSuccessfully: "Backup players added successfully",
       missingOrInvalidData: "Missing or invalid data",
-      invalidPlayersForThisMatch: "invalid players for this match",
+      invalidPlayersForThisMatch:"invalid players for this match",
       associatedMatchNotFound: "Associated match not found",
       playersAddedSuccessfully15: "players added successfully",
     },
@@ -767,7 +767,7 @@ const staticTranslations = {
     FANTASYTTEAM: {
       fantasyTeamsFetchedSuccessfully:
         "फैंटेसी टीमें सफलतापूर्वक प्राप्त की गईं",
-      invalidPlayersForThisMatch: "इस मैच के लिए अवैध खिलाड़ी",
+        invalidPlayersForThisMatch: "इस मैच के लिए अवैध खिलाड़ी",
       invalidInput:
         "अमान्य इनपुट: fantasy_team_id और inPlayers सरणी आवश्यक हैं",
       matchNotFound: "मैच नहीं मिला",
@@ -898,7 +898,7 @@ const staticTranslations = {
       DTOKNUPDATED: "ডিভাইস টোকেন সফলভাবে আপডেট হয়েছে",
       userAdded: "ব্যবহারকারী সফলভাবে যোগ করা হয়েছে।",
       missingRequiredFields: "প্রয়োজনীয় ফিল্ডগুলি অনুপস্থিত: id এবং status",
-
+      
       userAlreadyExists: "ব্যবহারকারী ইতিমধ্যেই বিদ্যমান",
       invalidStatusValue: "অবৈধ অবস্থা মান",
       statusUpdated: "স্থিতি সফলভাবে আপডেট করা হয়েছে",
@@ -1194,7 +1194,7 @@ const staticTranslations = {
       invalidInput11: "অবৈধ ইনপুট: অবশ্যই ঠিক 11 মূল খেলোয়াড় প্রদান করতে হবে",
       couldNotFindAssociatedMatchForPlayers:
         "খেলোয়াড়দের জন্য সম্পর্কিত ম্যাচ খুঁজে পাওয়া যায়নি",
-      invalidPlayersForThisMatch: "এই ম্যাচের জন্য অবৈধ খেলোয়াড়",
+        invalidPlayersForThisMatch: "এই ম্যাচের জন্য অবৈধ খেলোয়াড়",
       originalTeamNotFound: "মূল দল পাওয়া যায়নি",
       missingOrEmptyPlayersArray: "খেলোয়াড়দের অ্যারে অনুপস্থিত বা খালি",
       duplicatePlayerIds: "মূল দলে ডুপ্লিকেট খেলোয়াড় IDs অনুমোদিত নয়",

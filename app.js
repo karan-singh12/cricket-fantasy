@@ -8,11 +8,9 @@ const compression = require("compression");
 const rateLimit = require("express-rate-limit");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
-const mongoose = require("mongoose");
 
 const config = require("./config/config");
-// const { knex, testConnection } = require("./config/database"); // Deprecated
-const connectDB = require("./config/mongoose");
+const { knex, testConnection } = require("./config/database");
 const initializeSocket = require("./socket/socket");
 
 // Routes and middleware
@@ -57,11 +55,7 @@ app.use("/api", apiRoutes);
 // Health check
 app.get("/api/health", async (req, res) => {
   try {
-    // Check Mongo Connection
-    const state = mongoose.connection.readyState;
-    // 0: disconnected, 1: connected, 2: connecting, 3: disconnecting
-    if (state !== 1) throw new Error("MongoDB not connected");
-
+    await knex.raw("SELECT 1");
     res.json({
       status: "healthy",
       timestamp: new Date().toISOString(),
@@ -96,27 +90,29 @@ app.use((err, req, res, next) => {
 // Start server
 const startServer = async () => {
   try {
-    // Connect to MongoDB
-    await connectDB();
-    // await testConnection(); // Deprecated
+    await testConnection();
+    console.log("Database connected successfully");
 
     server.listen(config.port, () => {
       console.log(`Server running from PID: ${process.pid} at ${new Date().toISOString()}`);
       console.log(`Server running on port ${config.port}`);
     });
 
-    // Monitor DB connection (Mongoose handles auto-reconnect, but we can log)
-    mongoose.connection.on("disconnected", () => {
-      console.error("MongoDB disconnected!");
-    });
+    // Monitor DB connection
+    setInterval(async () => {
+      try {
+        await knex.raw("SELECT 1");
+      } catch (error) {
+        console.error("Database connection lost:", error.message);
+      }
+    }, 30000);
 
     // Graceful shutdown
     const shutdown = async () => {
       console.log("Shutting down...");
       server.close(async () => {
         try {
-          await mongoose.connection.close();
-          // await knex.destroy();
+          await knex.destroy();
           process.exit(0);
         } catch (error) {
           console.error("Error during shutdown:", error.message);

@@ -1,36 +1,33 @@
-const Match = require("../models/Match");
-const Contest = require("../models/Contest");
-const FantasyGame = require("../models/FantasyGame");
-const FantasyTeam = require("../models/FantasyTeam");
+const { knex: db } = require("../config/database");
 const { updateLeaderboardForMatch, handleMatchDataChange } = require("../socket/socket");
 
 /**
  * Utility class for updating leaderboards
  */
 class LeaderboardUpdater {
-
+  
   /**
    * Update leaderboard for a specific match
-   * @param {string} matchId - The match ID
-   * @param {string} contestId - Optional contest ID
+   * @param {number} matchId - The match ID
+   * @param {number} contestId - Optional contest ID
    * @returns {Promise<Object>} Update result
    */
   static async updateForMatch(matchId, contestId = null) {
     try {
       console.log(`🔄 LeaderboardUpdater: Updating leaderboard for match ${matchId}`);
-
+      
       if (!matchId) {
         throw new Error("Match ID is required");
       }
 
       const result = await updateLeaderboardForMatch(matchId, contestId);
-
+      
       if (result.success) {
         console.log(`✅ LeaderboardUpdater: Successfully updated leaderboard for match ${matchId}`);
       } else {
         console.error(`❌ LeaderboardUpdater: Failed to update leaderboard for match ${matchId}: ${result.message}`);
       }
-
+      
       return result;
     } catch (error) {
       console.error(`❌ LeaderboardUpdater: Error updating leaderboard for match ${matchId}:`, error);
@@ -40,26 +37,26 @@ class LeaderboardUpdater {
 
   /**
    * Handle match data change and trigger leaderboard update
-   * @param {string} matchId - The match ID
+   * @param {number} matchId - The match ID
    * @param {string} changeType - Type of change (e.g., 'score_update', 'player_out', 'wicket')
    * @returns {Promise<Object>} Update result
    */
   static async handleMatchDataChange(matchId, changeType = 'score_update') {
     try {
       console.log(`🔄 LeaderboardUpdater: Handling match data change for match ${matchId}, type: ${changeType}`);
-
+      
       if (!matchId) {
         throw new Error("Match ID is required");
       }
 
       const result = await handleMatchDataChange(matchId, changeType);
-
+      
       if (result.success) {
         console.log(`✅ LeaderboardUpdater: Successfully handled match data change for match ${matchId}`);
       } else {
         console.error(`❌ LeaderboardUpdater: Failed to handle match data change for match ${matchId}: ${result.message}`);
       }
-
+      
       return result;
     } catch (error) {
       console.error(`❌ LeaderboardUpdater: Error handling match data change for match ${matchId}:`, error);
@@ -74,8 +71,10 @@ class LeaderboardUpdater {
   static async updateAllLiveMatches() {
     try {
       console.log("🔄 LeaderboardUpdater: Updating leaderboards for all live matches");
-
-      const liveMatches = await Match.find({ status: { $regex: /live/i } }).select('_id');
+      
+      const liveMatches = await db('matches')
+        .where('status', 'live')
+        .select('id');
 
       if (!liveMatches.length) {
         console.log("ℹ️ LeaderboardUpdater: No live matches found");
@@ -88,16 +87,16 @@ class LeaderboardUpdater {
 
       for (const match of liveMatches) {
         try {
-          const result = await updateLeaderboardForMatch(match._id);
+          const result = await updateLeaderboardForMatch(match.id);
           if (result.success) {
             successCount++;
           } else {
             errorCount++;
-            errors.push({ matchId: match._id, error: result.message });
+            errors.push({ matchId: match.id, error: result.message });
           }
         } catch (error) {
           errorCount++;
-          errors.push({ matchId: match._id, error: error.message });
+          errors.push({ matchId: match.id, error: error.message });
         }
       }
 
@@ -111,7 +110,7 @@ class LeaderboardUpdater {
 
       console.log(`✅ LeaderboardUpdater: Completed updating ${successCount} matches with ${errorCount} errors`);
       return result;
-
+      
     } catch (error) {
       console.error("❌ LeaderboardUpdater: Error updating all live matches:", error);
       return { success: false, message: error.message };
@@ -120,32 +119,63 @@ class LeaderboardUpdater {
 
   /**
    * Update leaderboard for a specific contest
-   * @param {string} contestId - The contest ID
+   * @param {number} contestId - The contest ID
    * @returns {Promise<Object>} Update result
    */
   static async updateForContest(contestId) {
     try {
       console.log(`🔄 LeaderboardUpdater: Updating leaderboard for contest ${contestId}`);
-
+      
       if (!contestId) {
         throw new Error("Contest ID is required");
       }
 
-      const contest = await Contest.findById(contestId);
+      // Get all matches for this contest
+      const contest = await db('contests')
+        .where('id', contestId)
+        .first();
 
       if (!contest) {
         throw new Error("Contest not found");
       }
 
-      if (contest.match) {
+      if (contest.match_id) {
         // Single match contest
-        return await updateLeaderboardForMatch(contest.match, contestId);
+        return await updateLeaderboardForMatch(contest.match_id, contestId);
       } else {
-        // This part might need adjustment if contest can span tournament without a match ref
-        // For now, mirroring original logic's tournament support if applicable
-        return { success: false, message: "Contest match relationship not clear" };
-      }
+        // Tournament contest - update all matches
+        const matches = await db('matches')
+          .where('tournament_id', contest.tournament_id)
+          .select('id');
 
+        let successCount = 0;
+        let errorCount = 0;
+        const errors = [];
+
+        for (const match of matches) {
+          try {
+            const result = await updateLeaderboardForMatch(match.id, contestId);
+            if (result.success) {
+              successCount++;
+            } else {
+              errorCount++;
+              errors.push({ matchId: match.id, error: result.message });
+            }
+          } catch (error) {
+            errorCount++;
+            errors.push({ matchId: match.id, error: error.message });
+          }
+        }
+
+        return {
+          success: errorCount === 0,
+          message: `Updated ${successCount} matches for contest, ${errorCount} errors`,
+          updatedMatches: successCount,
+          errorCount,
+          errors: errorCount > 0 ? errors : []
+        };
+      }
+      
     } catch (error) {
       console.error(`❌ LeaderboardUpdater: Error updating leaderboard for contest ${contestId}:`, error);
       return { success: false, message: error.message };
@@ -154,49 +184,44 @@ class LeaderboardUpdater {
 
   /**
    * Force refresh leaderboard ranks for a match
-   * @param {string} matchId - The match ID
+   * @param {number} matchId - The match ID
    * @returns {Promise<Object>} Update result
    */
   static async refreshRanks(matchId) {
     try {
       console.log(`🔄 LeaderboardUpdater: Refreshing ranks for match ${matchId}`);
-
+      
       if (!matchId) {
         throw new Error("Match ID is required");
       }
 
-      // Find all contests for this match
-      const contests = await Contest.find({ match: matchId }).select('_id');
-      if (!contests.length) {
-        return { success: true, message: "No contests found for this match" };
+      // Get all leaderboard entries for this match
+      const entries = await db('leaderboard')
+        .where({ matchId: matchId })
+        .orderBy('totalScore', 'desc');
+
+      if (!entries.length) {
+        return { success: true, message: "No leaderboard entries found for this match" };
       }
 
-      let totalUpdated = 0;
-
-      for (const contest of contests) {
-        const entries = await FantasyGame.find({ contest: contest._id })
-          .sort({ points: -1, created_at: 1 });
-
-        if (!entries.length) continue;
-
-        let rank = 1;
-        for (const entry of entries) {
-          await FantasyGame.findByIdAndUpdate(entry._id, {
-            rank,
-            updated_at: new Date()
+      let rank = 1;
+      for (const entry of entries) {
+        await db('leaderboard')
+          .where({ id: entry.id })
+          .update({ 
+            rank, 
+            modified_at: new Date() 
           });
-          rank++;
-          totalUpdated++;
-        }
+        rank++;
       }
 
       console.log(`✅ LeaderboardUpdater: Successfully refreshed ranks for match ${matchId}`);
-      return {
-        success: true,
-        message: `Refreshed ranks for ${totalUpdated} entries across ${contests.length} contests`,
-        updatedEntries: totalUpdated
+      return { 
+        success: true, 
+        message: `Refreshed ranks for ${entries.length} entries`,
+        updatedEntries: entries.length
       };
-
+      
     } catch (error) {
       console.error(`❌ LeaderboardUpdater: Error refreshing ranks for match ${matchId}:`, error);
       return { success: false, message: error.message };
@@ -204,40 +229,37 @@ class LeaderboardUpdater {
   }
 
   /**
-   * Get current leaderboard for a contest (within a match context)
-   * @param {string} matchId - The match ID
-   * @param {string} contestId - The contest ID
+   * Get current leaderboard for a match
+   * @param {number} matchId - The match ID
    * @returns {Promise<Object>} Leaderboard data
    */
-  static async getLeaderboard(matchId, contestId) {
+  static async getLeaderboard(matchId) {
     try {
-      if (!contestId) {
-        throw new Error("Contest ID is required");
+      if (!matchId) {
+        throw new Error("Match ID is required");
       }
 
-      const leaderboard = await FantasyGame.find({ contest: contestId })
-        .populate("user", "name image_url")
-        .populate("fantasy_team", "name")
-        .sort({ points: -1, created_at: 1 })
-        .lean();
+      const leaderboard = await db("leaderboard")
+        .select(
+          "leaderboard.*",
+          "users.name as user_name",
+          "users.image_url",
+          "fantasy_teams.name as team_name"
+        )
+        .leftJoin("users", "leaderboard.userId", "users.id")
+        .leftJoin("fantasy_teams", "leaderboard.fantasyGameId", "fantasy_teams.id")
+        .where("leaderboard.matchId", matchId)
+        .orderBy("leaderboard.totalScore", "desc");
 
       return {
         success: true,
-        leaderboard: leaderboard.map(l => ({
-          ...l,
-          id: l._id,
-          user_name: l.user?.name,
-          image_url: l.user?.image_url,
-          team_name: l.fantasy_team?.name,
-          totalScore: l.points
-        })),
+        leaderboard,
         matchId,
-        contestId,
         totalEntries: leaderboard.length
       };
-
+      
     } catch (error) {
-      console.error(`❌ LeaderboardUpdater: Error getting leaderboard:`, error);
+      console.error(`❌ LeaderboardUpdater: Error getting leaderboard for match ${matchId}:`, error);
       return { success: false, message: error.message };
     }
   }

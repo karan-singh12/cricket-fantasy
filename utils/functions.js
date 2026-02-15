@@ -114,7 +114,7 @@ const deleteFileIfExists = (filePath) => {
   if (filePath && fs.existsSync(filePath)) {
     try {
       fs.unlinkSync(filePath);
-
+  
       return true;
     } catch (error) {
       console.error(`Error deleting file ${filePath}:`, error);
@@ -125,7 +125,7 @@ const deleteFileIfExists = (filePath) => {
 };
 
 function generateOtp() {
-  return "1234";
+  return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
 function replaceTemplateVars(template, data) {
@@ -169,7 +169,7 @@ const sendSms = async ({ to, message }) => {
 
     if (response.data.status === "0") {
       const msgId = response.data.array?.[0]?.msgId || "N/A";
-
+   
       return msgId;
     } else {
       console.error(`Failed to send SMS: ${response.data.reason}`);
@@ -182,7 +182,26 @@ const sendSms = async ({ to, message }) => {
 };
 
 async function sendOtpToUser({ email, phone, otp, subject, html }) {
-  console.log(`[OTP] Sending OTP ${otp} to ${email || phone} (Sending Disabled)`);
+  if (email) {
+    try {
+      await sendEmail({ to: email, subject, html });
+      // console.log(`✅ OTP ${otp} sent via Email to: ${email}`);
+    } catch (err) {
+      console.error(`❌ Failed to send OTP via Email to ${email}:`, err.message);
+      throw new Error("OTP sending failed via Email");
+    }
+  }
+
+  if (phone) {
+    const message = `Your OTP code is: ${otp}`;
+    try {
+      await sendSms({ to: phone, message });
+      // console.log(`✅ OTP ${otp} sent via SMS to: ${phone}`);
+    } catch (err) {
+      console.error(`❌ Failed to send OTP via SMS to ${phone}:`, err.message);
+      throw new Error("OTP sending failed via SMS");
+    }
+  }
 
   if (!email && !phone) {
     throw new Error("Either email or phone must be provided to send OTP");

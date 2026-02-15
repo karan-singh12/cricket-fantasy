@@ -4,7 +4,6 @@ exports.up = function (knex) {
         table.integer('user_id').unsigned().references('id').inTable('users').onDelete('CASCADE');
         table.string('title');
         table.string('content');
-        table.string('type').defaultTo('general');
         table.boolean('is_read').defaultTo(false);
         table.integer('match_id').nullable();
         table.timestamp('sent_at').defaultTo(knex.fn.now());

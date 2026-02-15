@@ -16,24 +16,16 @@ module.exports = {
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
     },
-    // MongoDB Configuration
-    mongo: {
-      uri: process.env.MONGO_URI || "mongodb://localhost:27017/fantasy_cricket_db",
-      options: {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
-      },
-    },
     pool: {
       min: 2,
       max: 20,
     },
     migrations: {
       tableName: "knex_migrations",
-      directory: "./database/migrations",
+      directory: "./migrations",
     },
     seeds: {
-      directory: "./database/seeds",
+      directory: "./seeds",
     },
   },
 
@@ -75,11 +67,11 @@ module.exports = {
     aws_region: process.env.bkash_disbursement_aws_region || "ap-southeast-1",
   },
   apay: {
-    apay_deposit:8,
-    apay_deposit_custom:2,
+    apay_deposit: 8,
+    apay_deposit_custom: 2,
 
-    apay_withdraw:3,
-    apay_withdraw_custom:15,
+    apay_withdraw: 3,
+    apay_withdraw_custom: 15,
 
     base_url: process.env.APAY_BASE_URL || "https://pay-crm.com",
     api_key: process.env.APAY_API_KEY || "e0c47d328612aab08dc54900c3f9126b",

@@ -13,7 +13,7 @@
     "startPM2": "pm2 start ecosystem.config.js",
     "stopPM2": "pm2 stop all",
     "logsPM2": "pm2 logs",
-    "restartPM2": "pm2 restart all"
+    "restartPM2": "pm2 restart all" 
   },
   "dependencies": {
     "@vitalets/google-translate-api": "^9.2.1",
@@ -38,7 +38,6 @@
     "lodash": "^4.17.21",
     "moment": "^2.30.1",
     "moment-timezone": "^0.6.0",
-    "mongoose": "^9.2.0",
     "morgan": "^1.10.0",
     "multer": "^2.0.0",
     "node-cron": "^4.2.0",

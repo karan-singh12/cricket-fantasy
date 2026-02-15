@@ -1,7 +1,8 @@
-const Admin = require("../../models/Admin");
-const EmailTemplate = require("../../models/EmailTemplate");
+const { knex: db } = require("../../config/database");
+const config = require("../../config/config");
 const apiResponse = require("../../utils/apiResponse");
-const bcrypt = require("bcryptjs");
+const bcrypt = require("bcrypt");
+const { slugGenrator } = require("../../utils/functions");
 const { ADMIN, ERROR, SUCCESS } = require("../../utils/responseMsg");
 const { sendEmail } = require("../../utils/email");
 
@@ -21,32 +22,44 @@ const SubadminController = {
       const email = req.body.email.toLowerCase();
       const permissionsArray = req.body.permission || [];
 
-      // Check if subadmin already exists
-      const existingAdmin = await Admin.findOne({
-        email: email,
-        status: { $in: [0, 1] }
-      });
+      // Check if subadmin already exists (case-insensitive)
+      const existingAdmin = await db("admins")
+        .whereRaw("LOWER(email) = ?", [email])
+        .whereIn("status", [0, 1])
+        .first();
 
       if (existingAdmin) {
         return apiResponse.ErrorResponse(res, ADMIN.emailExists);
       }
 
+      // Generate random password
       const randomPassword = generateRandomPassword();
+   
 
-      // Mongoose middleware will hash the password
-      const newSubadmin = await Admin.create({
-        name,
-        email,
-        password: randomPassword,
-        role: "subAdmin",
-        permission: permissionsArray,
-      });
+      // Hash the password
+      const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+      // Insert subadmin into DB
+      const [newSubadmin] = await db("admins")
+        .insert({
+          name,
+          email,
+          password: hashedPassword,
+          role: "subAdmin",
+          permission: db.raw("ARRAY[?]::text[]", [permissionsArray]),
+          created_at: db.fn.now(),
+          updated_at: db.fn.now(),
+        })
+        .returning("*");
 
       // Fetch email template
-      const templateResult = await EmailTemplate.findOne({
-        slug: process.env.USER_SEND_PASSWORD,
-        status: 1,
-      });
+      const templateResult = await db("emailtemplates")
+        .select("content", "subject")
+        .where({
+          slug: process.env.USER_SEND_PASSWORD,
+          status: 1,
+        })
+        .first();
 
       if (templateResult) {
         let content = templateResult.content;
@@ -61,15 +74,13 @@ const SubadminController = {
         };
 
         sendEmail(options);
+       
       }
-
-      const responseData = newSubadmin.toObject();
-      delete responseData.password;
 
       return apiResponse.successResponseWithData(
         res,
         ADMIN.subadminAdded,
-        { ...responseData, id: newSubadmin._id }
+        newSubadmin
       );
     } catch (error) {
       console.error(error);
@@ -88,43 +99,36 @@ const SubadminController = {
         status = [],
       } = req.body;
 
-      const limit = parseInt(pageSize) || 10;
-      const skip = (Math.max(1, parseInt(pageNumber)) - 1) * limit;
-
-      const filter = {
-        status: { $ne: 2 },
-        role: { $ne: "admin" }
-      };
+      pageNumber = Math.max(0, pageNumber - 1);
+      let query = db("admins")
+        .whereNot("status", 2)
+        .andWhereNot("role", "admin");
 
       if (status.length > 0) {
-        filter.status = { $in: status.map(Number) };
+        query.andWhere((qb) => qb.whereIn("status", status));
       }
 
       if (searchItem) {
-        filter.$or = [
-          { name: { $regex: searchItem, $options: "i" } },
-          { email: { $regex: searchItem, $options: "i" } }
-        ];
+        query.andWhere((builder) =>
+          builder
+            .whereILike("name", `%${searchItem}%`)
+            .orWhereILike("email", `%${searchItem}%`)
+        );
       }
 
-      const totalRecords = await Admin.countDocuments(filter);
-      const result = await Admin.find(filter)
-        .select("name email status created_at")
-        .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
+      const totalRecords = await query.clone().count().first();
 
-      const mappedResult = result.map(admin => ({
-        ...admin,
-        id: admin._id
-      }));
+      const result = await query
+        .select("id", "name", "email", "status", "created_at")
+        .orderBy(sortBy, sortOrder)
+        .limit(pageSize)
+        .offset(pageSize * pageNumber);
 
       return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
-        result: mappedResult,
-        totalRecords,
-        pageNumber: parseInt(pageNumber),
-        pageSize: limit,
+        result,
+        totalRecords: parseInt(totalRecords.count),
+        pageNumber: pageNumber + 1,
+        pageSize,
       });
     } catch (error) {
       console.log(error.message);
@@ -136,16 +140,16 @@ const SubadminController = {
     try {
       const { id } = req.params;
 
-      const subadmin = await Admin.findById(id).select("-password").lean();
+      const Subadmin = await db("admins").where({ id }).select("*").first();
 
-      if (!subadmin) {
+      if (!Subadmin) {
         return apiResponse.ErrorResponse(res, ADMIN.subadminNotFound);
       }
 
       return apiResponse.successResponseWithData(
         res,
         SUCCESS.dataFound,
-        { ...subadmin, id: subadmin._id }
+        Subadmin
       );
     } catch (error) {
       console.log(error.message);
@@ -160,15 +164,16 @@ const SubadminController = {
       const updateFields = {
         name,
         status,
+        updated_at: db.fn.now(),
       };
 
       if (email) {
         const loweredEmail = email.toLowerCase();
-        const existingAdmin = await Admin.findOne({
-          email: loweredEmail,
-          _id: { $ne: id },
-          status: { $in: [0, 1] }
-        });
+        const existingAdmin = await db("admins")
+          .whereRaw("LOWER(email) = ?", [loweredEmail])
+          .whereNot("id", id)
+          .whereIn("status", [0, 1])
+          .first();
 
         if (existingAdmin) {
           return apiResponse.ErrorResponse(
@@ -179,7 +184,10 @@ const SubadminController = {
         updateFields.email = loweredEmail;
       }
 
-      const updated = await Admin.findByIdAndUpdate(id, updateFields, { new: true }).select("-password").lean();
+      const [updated] = await db("admins")
+        .where({ id })
+        .update(updateFields)
+        .returning("*");
 
       if (!updated) {
         return apiResponse.ErrorResponse(res, ADMIN.subadminNotFound);
@@ -188,23 +196,33 @@ const SubadminController = {
       return apiResponse.successResponseWithData(
         res,
         ADMIN.subadminUpdated,
-        { ...updated, id: updated._id }
+        updated
       );
     } catch (error) {
       console.error("Update subadmin error:", error.message);
+      if (error.code === "23505") {
+        return apiResponse.ErrorResponse(
+          res,
+          "Email is already in use by another admin"
+        );
+      }
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
 
   async changeStatus(req, res) {
     try {
-      const { id, status } = req.body;
+      const { id } = req.body;
+      const { status } = req.body;
 
       if (![0, 1, 2].includes(status)) {
         return apiResponse.ErrorResponse(res, ADMIN.invalidStatus);
       }
 
-      const updated = await Admin.findByIdAndUpdate(id, { status }, { new: true }).select("-password").lean();
+      const [updated] = await db("admins")
+        .where({ id })
+        .update({ status, updated_at: db.fn.now() })
+        .returning("*");
 
       if (!updated) {
         return apiResponse.ErrorResponse(res, ADMIN.subadminNotFound);
@@ -213,7 +231,7 @@ const SubadminController = {
       return apiResponse.successResponseWithData(
         res,
         ADMIN.statusUpdated,
-        { ...updated, id: updated._id }
+        updated
       );
     } catch (error) {
       console.log(error.message);
@@ -225,7 +243,10 @@ const SubadminController = {
     try {
       const { id } = req.body;
 
-      const updated = await Admin.findByIdAndUpdate(id, { status: 2 }, { new: true }).select("-password").lean();
+      const [updated] = await db("admins")
+        .where({ id })
+        .update({ status: 2, updated_at: db.fn.now() })
+        .returning("*");
 
       if (!updated) {
         return apiResponse.ErrorResponse(res, ADMIN.subadminNotFound);
@@ -234,7 +255,7 @@ const SubadminController = {
       return apiResponse.successResponseWithData(
         res,
         ADMIN.subadminDeleted,
-        { ...updated, id: updated._id }
+        updated
       );
     } catch (error) {
       console.log(error.message);

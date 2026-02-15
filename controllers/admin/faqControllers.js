@@ -1,6 +1,9 @@
-const FAQModel = require('../../models/Faq');
+const { knex:db } = require('../../config/database');
 const apiResponse = require("../../utils/apiResponse");
+const { listing } = require("../../utils/functions");
 const { ERROR, FAQ, SUCCESS } = require("../../utils/responseMsg");
+
+const TABLE = 'faq';
 
 const faqController = {
   // Add FAQ
@@ -8,16 +11,17 @@ const faqController = {
     try {
       const { title, description, status = 1 } = req.body;
 
-      const result = await FAQModel.create({
-        title,
-        description,
-        status,
-      });
+      const [result] = await db(TABLE)
+        .insert({
+          title,
+          description,
+          status,
+          createdAt: db.fn.now(),
+          modifiedAt: db.fn.now(),
+        })
+        .returning("*");
 
-      return apiResponse.successResponseWithData(res, FAQ.faqAdded, {
-        ...result.toObject(),
-        id: result._id
-      });
+      return apiResponse.successResponseWithData(res, FAQ.faqAdded, result);
     } catch (error) {
       console.error(error.message);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -29,20 +33,17 @@ const faqController = {
     try {
       const { id, title, description, status } = req.body;
 
-      const data = await FAQModel.findByIdAndUpdate(id, {
-        title,
-        description,
-        status,
-      }, { new: true }).lean();
+      const [data] = await db(TABLE)
+        .where({ id })
+        .update({
+          title,
+          description,
+          status,
+          modifiedAt: db.fn.now(),
+        })
+        .returning("*");
 
-      if (!data) {
-        return apiResponse.ErrorResponse(res, FAQ.faqNotFound);
-      }
-
-      return apiResponse.successResponseWithData(res, FAQ.faqUpdated, {
-        ...data,
-        id: data._id
-      });
+      return apiResponse.successResponseWithData(res, FAQ.faqUpdated, data);
     } catch (error) {
       console.error(error.message);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -52,18 +53,12 @@ const faqController = {
   // Get One FAQ
   async getOneFaq(req, res) {
     try {
-      const result = await FAQModel.findById(req.params.id)
-        .select("title description status")
-        .lean();
+      const result = await db(TABLE)
+        .select("id", "title", "description", "status")
+        .where({ id: req.params.id })
+        .first();
 
-      if (!result) {
-        return apiResponse.ErrorResponse(res, FAQ.faqNotFound);
-      }
-
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
-        ...result,
-        id: result._id
-      });
+      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, result);
     } catch (error) {
       console.error(error.message);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -73,39 +68,38 @@ const faqController = {
   // Get All FAQs
   async getAllFaqs(req, res) {
     try {
-      const { pageSize = 10, pageNumber = 1, status = [], searchItem = "" } = req.body;
+      const { pageSize = 10, pageNumber = 1, status, searchItem = "" } = req.body;
 
-      const limit = parseInt(pageSize) || 10;
-      const skip = (Math.max(1, parseInt(pageNumber)) - 1) * limit;
+      const offset = (Math.max(0, pageNumber - 1)) * pageSize;
 
-      const filter = { status: { $ne: 2 } };
+      const searchQuery = db(TABLE).whereNot("status", 2);
 
-      if (status.length > 0) {
-        filter.status = { $in: status.map(Number) };
+      if (status?.length > 0) {
+        searchQuery.andWhere(builder => {
+          builder.whereIn("status", status);
+        });
       }
 
       if (searchItem) {
-        filter.title = { $regex: searchItem, $options: "i" };
+        searchQuery.andWhere("title", "ilike", `%${searchItem}%`);
       }
 
-      const totalRecords = await FAQModel.countDocuments(filter);
-      const result = await FAQModel.find(filter)
-        .sort({ created_at: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
+      const result = await searchQuery
+        .select("id", "title", "status", "description", "createdAt")
+        .orderBy("createdAt", "desc")
+        .limit(pageSize)
+        .offset(offset);
 
-      const mappedResult = result.map(faq => ({
-        ...faq,
-        id: faq._id,
-        createdAt: faq.created_at
-      }));
+      const total = await db(TABLE)
+        .whereNot("status", 2)
+        .count("id")
+        .first();
 
       return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
-        result: mappedResult,
-        totalRecords,
-        pageNumber: parseInt(pageNumber),
-        pageSize: limit,
+        result,
+        totalRecords: parseInt(total.count),
+        pageNumber,
+        pageSize,
       });
     } catch (error) {
       console.error(error.message);
@@ -116,14 +110,12 @@ const faqController = {
   // Delete FAQ (soft delete)
   async deleteFaq(req, res) {
     try {
-      const { id } = req.body;
-      const updated = await FAQModel.findByIdAndUpdate(id, {
-        status: 2,
-      }, { new: true });
-
-      if (!updated) {
-        return apiResponse.ErrorResponse(res, FAQ.faqNotFound);
-      }
+      await db(TABLE)
+        .where({ id: req.body.id })
+        .update({
+          status: 2,
+          modifiedAt: db.fn.now(),
+        });
 
       return apiResponse.successResponse(res, FAQ.faqDeleted);
     } catch (error) {
@@ -141,18 +133,14 @@ const faqController = {
         return apiResponse.ErrorResponse(res, 'Invalid status value');
       }
 
-      const result = await FAQModel.findByIdAndUpdate(id, { status }, { new: true }).lean();
-
-      if (!result) {
-        return apiResponse.ErrorResponse(res, FAQ.faqNotFound);
-      }
+      const [result] = await db(TABLE)
+        .where({ id })
+        .update({ status, modifiedAt: db.fn.now() })
+        .returning("*");
 
       const msg = status == 1 ? FAQ.faqActivated : FAQ.faqDeactivated;
 
-      return apiResponse.successResponseWithData(res, msg, {
-        ...result,
-        id: result._id
-      });
+      return apiResponse.successResponseWithData(res, msg, result);
     } catch (error) {
       console.error(error.message);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -160,4 +148,4 @@ const faqController = {
   }
 };
 
-module.exports = faqController;
+module.exports = faqController; 

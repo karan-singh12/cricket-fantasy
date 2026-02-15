@@ -1,6 +1,4 @@
-const Match = require("../models/Match");
-const Notification = require("../models/Notification");
-const User = require("../models/User");
+const { knex: db } = require("../config/database");
 const { sendPushNotificationFCM } = require("../utils/functions");
 
 const formatTime = (date) =>
@@ -16,79 +14,129 @@ async function checkAndSendMatchNotifications() {
     const now = new Date();
     const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60000);
 
-    console.log(`Checking matches between ${formatTime(now)} and ${formatTime(fiveMinutesFromNow)}`);
+    console.log(
+      `Checking matches between ${formatTime(now)} and ${formatTime(
+        fiveMinutesFromNow
+      )}`
+    );
 
-    const upcomingMatches = await Match.find({
-      start_time: { $gt: now, $lte: fiveMinutesFromNow },
-      status: { $nin: ["Finished", "Aban."] }
-    });
+    const upcomingMatches = await db("matches")
+      .where("start_time", ">", now)
+      .andWhere("start_time", "<=", fiveMinutesFromNow)
+      .andWhere("status", "!=", "Finished")
+      .andWhere("status", "!=", "Aban.")
+      .select("id", "match_number", "start_time", "status");
 
     if (!upcomingMatches.length) {
       console.log("No upcoming matches found in this time window");
       return;
     }
 
+    console.log(`Found ${upcomingMatches.length} matches to process`);
+
     for (const match of upcomingMatches) {
       const formattedStart = formatTime(new Date(match.start_time));
-      console.log(`Processing match ${match._id} (Starts at ${formattedStart})`);
+      console.log(`Processing match ${match.id} (Starts at ${formattedStart})`);
 
-      // Find unsent notifications for this match
-      const notifications = await Notification.find({
-        match: match._id,
-        status: true,
-        $or: [
-          { sent_at: { $exists: false } },
-          { sent_at: null },
-          { sent_at: { $lt: new Date(now.getTime() - 5 * 60000) } }
-        ],
-        title: { $regex: /Match|starting soon|Reminder/i }
-      }).populate('user');
-
-      const usersToNotify = notifications.filter(n => n.user && n.user.ftoken);
+      // FIXED: Only get match reminder notifications that haven't been sent yet
+      const usersToNotify = await db("notifications")
+        .where({
+          match_id: match.id,
+          "notifications.status": true,
+        })
+        .where(function () {
+          this.whereNull("sent_at").orWhere(
+            "sent_at",
+            "<",
+            db.raw(`NOW() - INTERVAL '5 minutes'`)
+          );
+        })
+        .whereNotNull("match_id") // Only match notifications
+        .whereRaw("LOWER(notifications.title) LIKE ?", ["%starting soon%"])
+        .whereRaw("LOWER(notifications.title) LIKE ?", ["%Match Reminder%"])
+        .whereRaw("LOWER(notifications.title) LIKE ?", ["%Match%"]) // Only match starting notifications
+        .join("users", "notifications.user_id", "users.id")
+        .whereNotNull("users.ftoken")
+        .select(
+          "users.id as user_id",
+          "users.ftoken",
+          "notifications.content",
+          "notifications.id as notification_id"
+        );
 
       if (!usersToNotify.length) {
-        console.log(`No users to notify for match ${match._id}`);
+        console.log(`No users to notify for match ${match.id}`);
         continue;
       }
 
-      const matchName = match.match_number || `Match ${match._id}`;
+      console.log(
+        `Sending notifications for match ${match.id} to ${usersToNotify.length} users`
+      );
+
+      const matchName = match.match_number || `Match ${match.id}`;
       const title = "Match Starting Soon!";
       const BATCH_SIZE = 100;
 
       for (let i = 0; i < usersToNotify.length; i += BATCH_SIZE) {
         const batch = usersToNotify.slice(i, i + BATCH_SIZE);
+        console.log(
+          `🔄 Processing batch ${Math.floor(i / BATCH_SIZE) + 1} of ${Math.ceil(
+            usersToNotify.length / BATCH_SIZE
+          )}`
+        );
 
         await Promise.all(
-          batch.map(async (notif) => {
-            const user = notif.user;
+          batch.map(async (user) => {
             try {
               await sendPushNotificationFCM(
                 user.ftoken,
                 title,
-                notif.content || `Your match ${matchName} is about to begin`,
+                user.content || `Your match ${matchName} is about to begin`,
                 {
-                  match_id: match._id.toString(),
+                  match_id: match.id.toString(),
                   type: "match_reminder",
                 }
               );
 
-              notif.sent = true;
-              notif.sent_at = new Date();
-              await notif.save();
+              // FIXED: Update sent_at to prevent re-sending
+              await db("notifications")
+                .where({ id: user.notification_id })
+                .update({
+                  sent: true,
+                  sent_at: new Date(),
+                });
 
-              console.log(`✓ Sent to user ${user._id}`);
+              console.log(`✓ Sent to user ${user.user_id}`);
             } catch (err) {
-              console.error(`Failed to notify user ${user._id}:`, err.message);
+              console.error(
+                `Failed to notify user ${user.user_id}:`,
+                err.message
+              );
+
               if (err.code === "messaging/registration-token-not-registered") {
-                await User.findByIdAndUpdate(user._id, { ftoken: null });
+                await db("users")
+                  .where({ id: user.user_id })
+                  .update({ ftoken: null });
+                console.log(
+                  `Removed invalid FCM token for user ${user.user_id}`
+                );
               }
             }
           })
         );
+
+        if (i + BATCH_SIZE < usersToNotify.length) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
       }
     }
   } catch (error) {
-    console.error("Critical error in checkAndSendMatchNotifications:", error);
+    console.error(
+      "Critical error in checkAndSendMatchNotifications:",
+      error.stack || error
+    );
+  } finally {
+    console.log("Notification check completed");
   }
 }
 

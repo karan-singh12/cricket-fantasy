@@ -1,11 +1,14 @@
-const HowToPlay = require("../../models/HowToPlay");
+const { knex: db } = require("../../config/database");
 const apiResponse = require("../../utils/apiResponse");
+
+const TABLE = "how_to_play";
 
 const howToPlayController = {
   async add(req, res) {
     try {
       const { tab, data } = req.body;
       const sections = data?.sections;
+     
 
       if (!tab || !Array.isArray(sections)) {
         return apiResponse.validationErrorWithData(
@@ -14,7 +17,7 @@ const howToPlayController = {
         );
       }
 
-      const exists = await HowToPlay.findOne({ tab });
+      const exists = await db(TABLE).where({ tab }).first();
       if (exists) {
         return apiResponse.ErrorResponse(res, "Tab already exists");
       }
@@ -24,16 +27,20 @@ const howToPlayController = {
         bannerImagePath = req.file.path.replace(/\\/g, "/");
       }
 
-      const result = await HowToPlay.create({
-        tab,
-        data: { sections },
-        banner_image: bannerImagePath,
-      });
+    
+
+      const [result] = await db(TABLE)
+        .insert({
+          tab,
+          data: JSON.stringify({ sections }),
+          banner_image: bannerImagePath,
+        })
+        .returning("*");
 
       return apiResponse.successResponseWithData(
         res,
         "Tab added successfully",
-        { ...result.toObject(), id: result._id }
+        result
       );
     } catch (err) {
       console.error(err);
@@ -44,35 +51,35 @@ const howToPlayController = {
   async list(req, res) {
     try {
       const { pageNumber = 1, pageSize = 10, search = "" } = req.body;
-      const limit = parseInt(pageSize) || 10;
-      const skip = (Math.max(1, parseInt(pageNumber)) - 1) * limit;
+      const offset = (pageNumber - 1) * pageSize;
 
-      const filter = {};
+      const queryBuilder = db(TABLE);
+
       if (search) {
-        filter.tab = { $regex: search, $options: "i" };
+        queryBuilder.whereILike("tab", `%${search}%`);
       }
 
-      const totalRecords = await HowToPlay.countDocuments(filter);
-      const result = await HowToPlay.find(filter)
-        .sort({ created_at: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
+      const totalRecordsResult = await queryBuilder
+        .clone()
+        .count("id as count")
+        .first();
+      const totalRecords = Number(totalRecordsResult?.count) || 0;
 
-      const mappedResult = result.map(item => ({
-        ...item,
-        id: item._id
-      }));
+      const result = await queryBuilder
+        .clone()
+        .orderBy("created_at", "desc")
+        .limit(pageSize)
+        .offset(offset);
 
       return apiResponse.successResponseWithData(
         res,
         "Tabs fetched successfully",
         {
-          result: mappedResult,
+          result,
           totalRecords,
           pageNumber: Number(pageNumber),
-          pageSize: limit,
-          totalPages: Math.ceil(totalRecords / limit),
+          pageSize: Number(pageSize),
+          totalPages: Math.ceil(totalRecords / pageSize),
         }
       );
     } catch (err) {
@@ -85,12 +92,12 @@ const howToPlayController = {
     try {
       const { id } = req.params;
 
-      const row = await HowToPlay.findById(id).lean();
+      const row = await db(TABLE).where({ id }).first();
       if (!row) {
         return apiResponse.ErrorResponse(res, "Tab not found");
       }
 
-      return apiResponse.successResponseWithData(res, "Tab fetched", { ...row, id: row._id });
+      return apiResponse.successResponseWithData(res, "Tab fetched", row);
     } catch (err) {
       console.error(err);
       return apiResponse.ErrorResponse(res, "Error fetching tab");
@@ -101,21 +108,27 @@ const howToPlayController = {
     try {
       const { id, tab, sections } = req.body;
 
-      const updatedData = {};
+      const updatedData = {
+        updated_at: db.fn.now(),
+      };
+
       if (tab) updatedData.tab = tab;
-      if (sections) updatedData.data = { sections };
+      if (sections) updatedData.data = JSON.stringify({ sections });
 
       if (req.file) {
         updatedData.banner_image = req.file.path.replace(/\\/g, "/");
       }
 
-      const updated = await HowToPlay.findByIdAndUpdate(id, updatedData, { new: true }).lean();
+      const [updated] = await db(TABLE)
+        .where({ id })
+        .update(updatedData)
+        .returning("*");
 
       if (!updated) {
         return apiResponse.ErrorResponse(res, "Update failed");
       }
 
-      return apiResponse.successResponseWithData(res, "Tab updated", { ...updated, id: updated._id });
+      return apiResponse.successResponseWithData(res, "Tab updated", updated);
     } catch (err) {
       console.error(err);
       return apiResponse.ErrorResponse(
@@ -129,11 +142,14 @@ const howToPlayController = {
     try {
       const { id, status } = req.body;
 
-      if (typeof status !== 'boolean') {
+      if (![true, false].includes(status)) {
         return apiResponse.ErrorResponse(res, "Invalid status");
       }
 
-      const updated = await HowToPlay.findByIdAndUpdate(id, { status }, { new: true }).lean();
+      const [updated] = await db(TABLE)
+        .where({ id })
+        .update({ status })
+        .returning("*");
 
       if (!updated) {
         return apiResponse.ErrorResponse(res, "Status change failed");
@@ -142,7 +158,7 @@ const howToPlayController = {
       return apiResponse.successResponseWithData(
         res,
         "Status updated",
-        { ...updated, id: updated._id }
+        updated
       );
     } catch (err) {
       console.error(err);
@@ -154,7 +170,7 @@ const howToPlayController = {
     try {
       const { id } = req.params;
 
-      const deleted = await HowToPlay.findByIdAndDelete(id);
+      const deleted = await db(TABLE).where({ id }).del();
 
       if (!deleted) {
         return apiResponse.ErrorResponse(

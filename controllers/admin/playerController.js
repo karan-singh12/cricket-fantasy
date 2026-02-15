@@ -1,28 +1,17 @@
-const mongoose = require('mongoose');
-const Player = require('../../models/Player');
-const Team = require('../../models/Team');
-const PlayerStat = require('../../models/PlayerStat');
-const Match = require('../../models/Match');
-const FantasyTeam = require('../../models/FantasyTeam');
+const {knex:db} = require('../../config/database');
 const apiResponse = require('../../utils/apiResponse');
+const { slugGenrator } = require('../../utils/functions');
 const { USER, ERROR, SUCCESS } = require('../../utils/responseMsg');
 
 const playerController = {
     async getAllPlayers(req, res) {
         try {
-            const players = await Player.find()
-                .populate('team', 'name')
-                .sort({ name: 1 })
-                .lean();
+            const players = await db('players')
+                .select('players.*', 'teams.name as team_name')
+                .leftJoin('teams', 'players.team_id', 'teams.id')
+                .orderBy('players.name');
 
-            // Structure response to match SQL output somewhat
-            const formatted = players.map(p => ({
-                ...p,
-                team_name: p.team?.name,
-                team_id: p.team?._id // or sportmonks match?
-            }));
-
-            res.json(formatted);
+            res.json(players);
         } catch (error) {
             res.status(500).json({ error: error.message });
         }
@@ -41,38 +30,32 @@ const playerController = {
                 date_of_birth
             } = req.body;
 
-            // Validate team
-            let team = null;
-            if (team_id) {
-                if (mongoose.Types.ObjectId.isValid(team_id)) {
-                    team = await Team.findById(team_id);
-                } else {
-                    // Fallback for sportmonks_id
-                    team = await Team.findOne({ sportmonks_id: team_id });
-                }
-                if (!team) return res.status(400).json({ error: 'Invalid team' });
+        
+
+            // Validate team exists
+            const team = await db('teams').where('id', team_id).first();
+            if (!team) {
+                return res.status(400).json({ error: 'Invalid team' });
             }
 
             // Validate role
-            const validRoles = ['batsman', 'bowler', 'all-rounder', 'wicket-keeper', 'Batsman', 'Bowler', 'All-Rounder', 'Wicketkeeper'];
-            if (role && !validRoles.includes(role)) {
+            if (!['batsman', 'bowler', 'all-rounder', 'wicket-keeper'].includes(role)) {
                 return res.status(400).json({ error: 'Invalid role' });
             }
 
-            const player = new Player({
-                name,
-                team: team?._id,
-                position: role, // Remapped 'role' -> 'position'
-                credits: base_price, // 'base_price' -> 'credits'? SQL schema had 'base_price' but Mongoose has 'credits'.
-                // 'batting_style', 'bowling_style' ? Not in simple schema, maybe metadata?
-                // Let's store them in metadata if needed or strict scheme.
-                // Assuming schema can be extended or ignored.
-                // country_id from nationality?
-                date_of_birth,
-                sportmonks_id: Math.floor(Math.random() * 1000000) // Temp ID generation
-            });
+            const [player] = await db('players')
+                .insert({
+                    name,
+                    team_id,
+                    role,
+                    base_price,
+                    batting_style,
+                    bowling_style,
+                    nationality,
+                    date_of_birth
+                })
+                .returning('*');
 
-            await player.save();
             res.status(201).json(player);
         } catch (error) {
             res.status(500).json({ error: error.message });
@@ -93,26 +76,36 @@ const playerController = {
                 date_of_birth
             } = req.body;
 
-            const updateData = {};
-            if (name) updateData.name = name;
-            if (role) updateData.position = role;
-            if (base_price) updateData.credits = base_price;
-            if (date_of_birth) updateData.date_of_birth = date_of_birth;
-
             if (team_id) {
-                let team;
-                if (mongoose.Types.ObjectId.isValid(team_id)) {
-                    team = await Team.findById(team_id);
-                } else {
-                    team = await Team.findOne({ sportmonks_id: team_id });
+                const team = await db('teams').where('id', team_id).first();
+                if (!team) {
+                    return res.status(400).json({ error: 'Invalid team' });
                 }
-                if (!team) return res.status(400).json({ error: 'Invalid team' });
-                updateData.team = team._id;
             }
 
-            const player = await Player.findByIdAndUpdate(id, updateData, { new: true });
+            if (role && !['batsman', 'bowler', 'all-rounder', 'wicket-keeper'].includes(role)) {
+                return res.status(400).json({ error: 'Invalid role' });
+            }
 
-            if (!player) return res.status(404).json({ error: 'Player not found' });
+            const [player] = await db('players')
+                .where('id', id)
+                .update({
+                    name,
+                    team_id,
+                    role,
+                    base_price,
+                    batting_style,
+                    bowling_style,
+                    nationality,
+                    date_of_birth,
+                    updated_at: db.fn.now()
+                })
+                .returning('*');
+
+            if (!player) {
+                return res.status(404).json({ error: 'Player not found' });
+            }
+
             res.json(player);
         } catch (error) {
             res.status(500).json({ error: error.message });
@@ -123,12 +116,19 @@ const playerController = {
         try {
             const { id } = req.params;
             const { is_active } = req.body;
-            // 'is_active' field in Player schema? Not currently. 
-            // Assuming we add it or it's implicitly supported.
-            // Mongoose flexible?
-            // I'll update it.
-            const player = await Player.findByIdAndUpdate(id, { is_active }, { new: true });
-            if (!player) return res.status(404).json({ error: 'Player not found' });
+
+            const [player] = await db('players')
+                .where('id', id)
+                .update({
+                    is_active,
+                    updated_at: db.fn.now()
+                })
+                .returning('*');
+
+            if (!player) {
+                return res.status(404).json({ error: 'Player not found' });
+            }
+
             res.json(player);
         } catch (error) {
             res.status(500).json({ error: error.message });
@@ -137,7 +137,7 @@ const playerController = {
 
     async updatePlayerStats(req, res) {
         try {
-            const { id } = req.params; // Player ID
+            const { id } = req.params;
             const {
                 match_id,
                 runs_scored,
@@ -152,39 +152,47 @@ const playerController = {
                 run_outs
             } = req.body;
 
-            const player = await Player.findById(id);
-            const match = await Match.findById(match_id);
+            // Validate player and match exist
+            const player = await db('players').where('id', id).first();
+            const match = await db('matches').where('id', match_id).first();
 
-            if (!player || !match) return res.status(400).json({ error: 'Invalid player or match' });
+            if (!player || !match) {
+                return res.status(400).json({ error: 'Invalid player or match' });
+            }
 
+            // Calculate fantasy points based on stats
             const fantasyPoints = calculateFantasyPoints({
-                runs_scored: Number(runs_scored) || 0,
-                fours: Number(fours) || 0,
-                sixes: Number(sixes) || 0,
-                wickets_taken: Number(wickets_taken) || 0,
-                catches_taken: Number(catches_taken) || 0,
-                stumpings: Number(stumpings) || 0,
-                run_outs: Number(run_outs) || 0
+                runs_scored,
+                balls_faced,
+                fours,
+                sixes,
+                wickets_taken,
+                overs_bowled,
+                runs_conceded,
+                catches_taken,
+                stumpings,
+                run_outs
             });
 
-            // Upsert PlayerStat
-            const stats = await PlayerStat.findOneAndUpdate(
-                { player: id, match: match_id },
-                {
+            const [stats] = await db('player_stats')
+                .insert({
+                    player_id: id,
+                    match_id,
                     runs_scored,
-                    // balls_faced? Schema doesn't have it, maybe add to schema?
+                    balls_faced,
                     fours,
                     sixes,
-                    wickets: wickets_taken, // Schema has 'wickets'
-                    overs: overs_bowled, // Schema has 'overs'
-                    // runs_conceded? Economy calculation?
-                    catches: catches_taken,
+                    wickets_taken,
+                    overs_bowled,
+                    runs_conceded,
+                    catches_taken,
                     stumpings,
                     run_outs,
                     fantasy_points: fantasyPoints
-                },
-                { upsert: true, new: true, setDefaultsOnInsert: true }
-            );
+                })
+                .onConflict(['player_id', 'match_id'])
+                .merge()
+                .returning('*');
 
             res.json(stats);
         } catch (error) {
@@ -195,15 +203,12 @@ const playerController = {
     async getPlayersByTeam(req, res) {
         try {
             const { teamId } = req.params;
-            let query = {};
-            if (mongoose.Types.ObjectId.isValid(teamId)) {
-                query.team = teamId;
-            } else {
-                const team = await Team.findOne({ sportmonks_id: teamId });
-                if (team) query.team = team._id;
-            }
 
-            const players = await Player.find(query).sort({ name: 1 });
+            const players = await db('players')
+                .select('players.*')
+                .where('team_id', teamId)
+                .orderBy('name');
+
             res.json(players);
         } catch (error) {
             res.status(500).json({ error: error.message });
@@ -213,16 +218,22 @@ const playerController = {
     async getPlayersByMatch(req, res) {
         try {
             const { matchId } = req.params;
-            const match = await Match.findById(matchId);
-            if (!match) return res.status(404).json({ error: 'Match not found' });
 
-            const players = await Player.find({
-                team: { $in: [match.team1, match.team2] }
-            })
-                .populate('team', 'name')
-                .sort({ 'team.name': 1, name: 1 }); // Sort might need aggregation if sorting by populated field
+            const match = await db('matches')
+                .where('id', matchId)
+                .first();
 
-            // Simple sort by name for now, client can group
+            if (!match) {
+                return res.status(404).json({ error: 'Match not found' });
+            }
+
+            const players = await db('players')
+                .select('players.*', 'teams.name as team_name')
+                .leftJoin('teams', 'players.team_id', 'teams.id')
+                .where('team_id', match.team1_id)
+                .orWhere('team_id', match.team2_id)
+                .orderBy(['teams.name', 'players.name']);
+
             res.json(players);
         } catch (error) {
             res.status(500).json({ error: error.message });
@@ -233,14 +244,23 @@ const playerController = {
         try {
             const { id } = req.params;
 
-            // Check usage in FantasyTeam
-            const count = await FantasyTeam.countDocuments({ "players.player": id });
-            if (count > 0) {
+            // Check if player exists in any fantasy teams
+            const fantasyTeamCount = await db('fantasy_team_players')
+                .where('player_id', id)
+                .count()
+                .first();
+
+            if (parseInt(fantasyTeamCount.count) > 0) {
                 return res.status(400).json({ error: 'Cannot delete player who is part of fantasy teams' });
             }
 
-            const deleted = await Player.findByIdAndDelete(id);
-            if (!deleted) return res.status(404).json({ error: 'Player not found' });
+            const deleted = await db('players')
+                .where('id', id)
+                .del();
+
+            if (!deleted) {
+                return res.status(404).json({ error: 'Player not found' });
+            }
 
             res.json({ message: 'Player deleted successfully' });
         } catch (error) {
@@ -250,21 +270,18 @@ const playerController = {
 
     async updatePlayersWithRandomData(req, res) {
         try {
-            const players = await Player.find().select('_id');
-            const bulkOps = players.map(p => ({
-                updateOne: {
-                    filter: { _id: p._id },
-                    update: {
+            const players = await db('players').select('id');
+
+            for (const player of players) {
+                await db('players')
+                    .where({ id: player.id })
+                    .update({
                         points: Math.floor(Math.random() * (300 - 80 + 1)) + 80,
                         credits: parseFloat((Math.random() * (11.0 - 7.0) + 7.0).toFixed(1)),
-                        // is_played_last_match?
-                        // selected_by_percentage?
-                    }
-                }
-            }));
-
-            if (bulkOps.length > 0) {
-                await Player.bulkWrite(bulkOps);
+                        is_played_last_match: Math.random() < 0.5,
+                        selected_by_percentage: parseFloat((Math.random() * 100).toFixed(2)),
+                        updated_at:  db.fn.now()
+                    });
             }
 
             return res.status(200).json({
@@ -272,26 +289,39 @@ const playerController = {
                 message: `✅ Updated ${players.length} players with random data.`,
             });
         } catch (error) {
-            console.error(error);
-            return res.status(500).json({ error: error.message });
+            console.error('❌ Error updating players:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to update players.',
+                error: error.message,
+            });
         }
-    }
+    },
 };
 
+
+// Helper function to calculate fantasy points
 function calculateFantasyPoints(stats) {
     let points = 0;
-    points += (stats.runs_scored || 0) * 1;
-    if (stats.runs_scored >= 50) points += 5;
-    if (stats.runs_scored >= 100) points += 10;
-    points += (stats.fours || 0) * 1;
-    points += (stats.sixes || 0) * 2;
-    points += (stats.wickets_taken || 0) * 25;
-    if (stats.wickets_taken >= 3) points += 5;
-    if (stats.wickets_taken >= 5) points += 10;
-    points += (stats.catches_taken || 0) * 10;
-    points += (stats.stumpings || 0) * 15;
-    points += (stats.run_outs || 0) * 10;
+
+    // Batting points
+    points += stats.runs_scored * 1; // 1 point per run
+    if (stats.runs_scored >= 50) points += 5; // Bonus for half-century
+    if (stats.runs_scored >= 100) points += 10; // Bonus for century
+    points += stats.fours * 1; // 1 point per four
+    points += stats.sixes * 2; // 2 points per six
+
+    // Bowling points
+    points += stats.wickets_taken * 25; // 25 points per wicket
+    if (stats.wickets_taken >= 3) points += 5; // Bonus for 3+ wickets
+    if (stats.wickets_taken >= 5) points += 10; // Bonus for 5+ wickets
+
+    // Fielding points
+    points += stats.catches_taken * 10; // 10 points per catch
+    points += stats.stumpings * 15; // 15 points per stumping
+    points += stats.run_outs * 10; // 10 points per run-out
+
     return points;
 }
 
-module.exports = playerController;
+module.exports = playerController; 

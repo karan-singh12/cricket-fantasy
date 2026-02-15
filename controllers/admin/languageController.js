@@ -1,14 +1,14 @@
-const Language = require("../../models/Language");
+const { knex: db } = require("../../config/database");
 const apiResponse = require("../../utils/apiResponse");
 const { ERROR, SUCCESS, LANGUAGE } = require("../../utils/responseMsg");
 
 const languageController = {
   async Addlanguage(req, res) {
     try {
-      const { language_type, name, status = 1 } = req.body;
+      const { language_type, name, status } = req.body;
 
       if (!language_type || !name) {
-        return apiResponse.validationErrorWithData(res, LANGUAGE.languageTypeAndNameRequired);
+        return apiResponse.validationErrorWithData( res, LANGUAGE.languageTypeAndNameRequired );
       }
       const alphaRegex = /^[A-Za-z]+$/;
 
@@ -18,7 +18,7 @@ const languageController = {
           "language_type must contain only letters (no spaces, numbers, or special characters)"
         );
       }
-
+  
       if (!alphaRegex.test(name)) {
         return apiResponse.validationErrorWithData(
           res,
@@ -32,7 +32,7 @@ const languageController = {
           LANGUAGE.languageTypeMaxLength
         );
       }
-
+  
       if (name.length > 12) {
         return apiResponse.validationErrorWithData(
           res,
@@ -42,22 +42,28 @@ const languageController = {
 
       const capitalized_language_type = language_type.toUpperCase();
 
-      const existingLanguage = await Language.findOne({ language_type: capitalized_language_type });
+      const existingLanguage = await db("language")
+        .where("language_type", capitalized_language_type)
+        .first();
 
       if (existingLanguage) {
         return apiResponse.ErrorResponse(res, LANGUAGE.languageAlreadyExists);
       }
 
-      const newLanguage = await Language.create({
-        language_type: capitalized_language_type,
-        name,
-        status,
-      });
+      const [newLanguage] = await db("language")
+        .insert({
+          language_type:capitalized_language_type,
+          name,
+          status: status ?? 1,
+          created_at: db.fn.now(),
+          updated_at: db.fn.now(),
+        })
+        .returning("*");
 
       return apiResponse.successResponseWithData(
         res,
         LANGUAGE.languageAdded,
-        { ...newLanguage.toObject(), id: newLanguage._id }
+        newLanguage
       );
     } catch (error) {
       console.error("Error adding language:", error.message);
@@ -68,38 +74,53 @@ const languageController = {
   async Getalllanguage(req, res) {
     try {
       const { limit = 10, page = 1, search = "" } = req.body;
-      const pageSize = parseInt(limit) || 10;
-      const skip = (Math.max(1, parseInt(page)) - 1) * pageSize;
-
-      const filter = {};
+      const offset = (Math.max(0, page - 1)) * limit;
+  
+      let query = db("language")
+  
+      // If search keyword is provided
       if (search.trim() !== "") {
-        filter.$or = [
-          { language_type: { $regex: search.trim(), $options: "i" } },
-          { name: { $regex: search.trim(), $options: "i" } }
-        ];
+        query = query.where(function () {
+          this.where("language_type", "ilike", `%${search.trim()}%`)
+            .orWhere("name", "ilike", `%${search.trim()}%`);
+        });
+  
+        // Ignore pagination when search is used
+        const languages = await query
+          .select("*")
+          .orderBy("created_at", "desc");
+  
+        return apiResponse.successResponseWithData(
+          res,
+          LANGUAGE.languagesFetchedSuccessfully,
+          {
+            data: languages,
+            current_page: 1,
+            total_pages: 1,
+            total_records: languages.length,
+            limit: languages.length,
+          }
+        );
       }
-
-      const totalRecords = await Language.countDocuments(filter);
-      const languages = await Language.find(filter)
-        .sort({ created_at: -1 })
-        .skip(search.trim() !== "" ? 0 : skip) // Original logic skipped pagination on search
-        .limit(search.trim() !== "" ? undefined : pageSize)
-        .lean();
-
-      const mappedData = languages.map(lang => ({
-        ...lang,
-        id: lang._id
-      }));
-
+  
+      // When no search, apply pagination
+      const totalCount = await query.clone().count("* as count").first();
+  
+      const languages = await query
+        .select("*")
+        .orderBy("created_at", "desc")
+        .limit(limit)
+        .offset(offset);
+  
       return apiResponse.successResponseWithData(
         res,
         LANGUAGE.languagesFetchedSuccessfully,
         {
-          data: mappedData,
-          current_page: search.trim() !== "" ? 1 : parseInt(page),
-          total_pages: search.trim() !== "" ? 1 : Math.ceil(totalRecords / pageSize),
-          total_records: totalRecords,
-          limit: search.trim() !== "" ? totalRecords : pageSize,
+          data: languages,
+          current_page: parseInt(page),
+          total_pages: Math.ceil(totalCount.count / limit),
+          total_records: Number(totalCount.count),
+          limit: parseInt(limit),
         }
       );
     } catch (error) {
@@ -107,12 +128,20 @@ const languageController = {
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
+  
 
   async GetlanguageById(req, res) {
     try {
       const { id } = req.params;
 
-      const language = await Language.findById(id).lean();
+      if (!id) {
+        return apiResponse.validationErrorWithData(
+          res,
+          "Language ID is required"
+        );
+      }
+
+      const language = await db("language").where("id", id).first();
 
       if (!language) {
         return apiResponse.ErrorResponse(res, LANGUAGE.languageNotFound);
@@ -121,7 +150,7 @@ const languageController = {
       return apiResponse.successResponseWithData(
         res,
         LANGUAGE.languageFetchedSuccessfully,
-        { ...language, id: language._id }
+        language
       );
     } catch (error) {
       console.error("Error fetching language:", error);
@@ -137,6 +166,15 @@ const languageController = {
       const { id } = req.params;
       const { language_type, name } = req.body;
 
+   
+
+      if (!id) {
+        return apiResponse.validationErrorWithData(
+          res,
+          LANGUAGE.languageIDRequired
+        );
+      }
+
       if (!language_type || !name) {
         return apiResponse.validationErrorWithData(
           res,
@@ -144,28 +182,33 @@ const languageController = {
         );
       }
 
-      const duplicateLanguage = await Language.findOne({
-        language_type: language_type.toUpperCase(),
-        _id: { $ne: id }
-      });
+      const existingLanguage = await db("language").where("id", id).first();
+      if (!existingLanguage) {
+        return apiResponse.ErrorResponse(res, LANGUAGE.languageNotFound);
+      }
+
+      const duplicateLanguage = await db("language")
+        .where("language_type", language_type)
+        .whereNot("id", id)
+        .first();
 
       if (duplicateLanguage) {
         return apiResponse.ErrorResponse(res, LANGUAGE.languageTypeAlreadyExists);
       }
 
-      const updated = await Language.findByIdAndUpdate(id, {
-        language_type: language_type.toUpperCase(),
-        name,
-      }, { new: true }).lean();
-
-      if (!updated) {
-        return apiResponse.ErrorResponse(res, LANGUAGE.languageNotFound);
-      }
+      const [updatedLanguage] = await db("language")
+        .where("id", id)
+        .update({
+          language_type,
+          name,
+          updated_at: db.fn.now(),
+        })
+        .returning("*");
 
       return apiResponse.successResponseWithData(
         res,
         LANGUAGE.languageUpdatedSuccessfully,
-        { ...updated, id: updated._id }
+        updatedLanguage
       );
     } catch (error) {
       console.error("Error updating language:", error);
@@ -179,18 +222,28 @@ const languageController = {
   async ToggleLanguageStatus(req, res) {
     try {
       const { id } = req.body;
-      const language = await Language.findById(id);
-      if (!language) {
-        return apiResponse.ErrorResponse(res, LANGUAGE.languageNotFound);
+      if (!id) {
+        return apiResponse.validationErrorWithData(
+          res,
+          "Language ID is required"
+        );
       }
-
-      language.status = language.status === 1 ? 0 : 1;
-      await language.save();
-
+      const language = await db("language").where("id", id).first();
+      if (!language) {
+        return apiResponse.ErrorResponse(res,LANGUAGE.languageNotFound);
+      }
+      const newStatus = language.status === 1 ? 0 : 1;
+      const [updatedLanguage] = await db("language")
+        .where("id", id)
+        .update({
+          status: newStatus,
+          updated_at: db.fn.now(),
+        })
+        .returning("*");
       return apiResponse.successResponseWithData(
         res,
-        `Language status toggled to ${language.status === 1 ? "active" : "inactive"}`,
-        { ...language.toObject(), id: language._id }
+        `Language status toggled to ${newStatus === 1 ? "active" : "inactive"}`,
+        updatedLanguage
       );
     } catch (error) {
       console.error("Error toggling language status:", error.message);

@@ -3,13 +3,11 @@ exports.up = function (knex) {
 		table.increments('id').primary();
 		table.integer('match_id').notNullable().references('id').inTable('matches').onDelete('CASCADE');
 		table.integer('player_id').notNullable().references('id').inTable('players').onDelete('CASCADE');
-		table.integer('team_id').notNullable().references('id').inTable('teams').onDelete('CASCADE');
 		table.boolean('is_playing_xi').notNullable().defaultTo(false);
 		table.boolean('is_substitute').notNullable().defaultTo(false);
 		// Optional flags if you want to store lineup meta
 		table.boolean('is_captain').notNullable().defaultTo(false);
 		table.boolean('is_wicketkeeper').notNullable().defaultTo(false);
-		table.string('role');
 		table.unique(['match_id', 'player_id']);
 		table.index(['match_id']);
 		table.index(['player_id']);

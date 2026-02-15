@@ -1,36 +1,87 @@
 const moment = require("moment");
-const Tournament = require("../../models/Tournament");
-const Match = require("../../models/Match");
-const Team = require("../../models/Team");
+const { knex } = require("../../config/database");
 const apiResponse = require("../../utils/apiResponse");
 const { ERROR, SUCCESS, TOURNAMENT } = require("../../utils/responseMsg");
 
 const tournamentController = {
   // Get all tournaments
   async getAllTournaments(req, res) {
+   
     try {
-      console.log("req.user", req.user);
       const today = moment().startOf("day").toDate();
       const oneMonthLater = moment().add(1, "months").endOf("day").toDate();
+      // const next7Days = moment().add(7, "days").endOf("day").toDate();
 
-      // Find all active tournaments
-      const tournaments = await Tournament.find({ status: { $in: [true, "active", "1"] } })
-        .sort({ name: 1 })
-        .lean();
+      const tournaments = await knex("tournaments as t")
+        .select("t.*")
+        .where("t.status", true)
+        .whereExists(function () {
+          this.select("*")
+            .from("matches as m")
+            .leftJoin("teams as t1", "m.team1_id", "t1.id")
+            .leftJoin("teams as t2", "m.team2_id", "t2.id")
+            .whereRaw("m.tournament_id = t.id")
+            .whereBetween("m.start_time", [today, oneMonthLater])
+            .where("m.status", "NS")
+          .whereNotNull("t1.id")
+          .whereNotNull("t2.id")
+          .whereExists(function () {
+            this.select("*")
+              .from("player_teams")
+              .whereRaw("player_teams.team_id = m.team1_id")
+              .whereRaw("player_teams.season_id::text = t.season");
+          })
+          .whereExists(function () {
+            this.select("*")
+              .from("player_teams")
+              .whereRaw("player_teams.team_id = m.team2_id")
+              .whereRaw("player_teams.season_id::text = t.season");
+          })
+          
+        })
+        .orderBy("t.name", "asc");
 
-      // Filter tournaments that have upcoming matches in the next month
-      // Note: Replicating the exact "player_teams" check might be complex here, 
-      // focusing on tournaments with valid upcoming matches for now.
-      // const tournamentIdsWithMatches = await Match.distinct("tournament", {
-      //   status: "NS",
-      //   start_time: { $gte: today, $lte: oneMonthLater }
-      // });
+    
 
-      // const filteredTournaments = tournaments.filter(t =>
-      //   tournamentIdsWithMatches.some(id => id.toString() === t._id.toString())
-      // );
 
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, tournaments);
+      const { getLanguage } = require("../../utils/responseMsg");
+      const { translateTo } = require("../../utils/google");
+
+      const lang =
+        getLanguage().toLowerCase() === "hn"
+          ? "hi"
+          : getLanguage().toLowerCase();
+
+    
+      const translatedTournaments = await Promise.all(
+        tournaments.map(async (t) => {
+          const translatedName = await translateTo(t.name, lang);
+          let translatedMetadata = t.metadata;
+
+          if (
+            translatedMetadata &&
+            typeof translatedMetadata === "object" &&
+            translatedMetadata.name
+          ) {
+            translatedMetadata = {
+              ...translatedMetadata,
+              name: await translateTo(translatedMetadata.name, lang),
+            };
+          }
+
+          return {
+            ...t,
+            name: translatedName,
+            metadata: translatedMetadata,
+          };
+        })
+      );
+
+      return apiResponse.successResponseWithData(
+        res,
+        SUCCESS.dataFound,
+        translatedTournaments
+      );
     } catch (error) {
       console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -40,13 +91,20 @@ const tournamentController = {
   // Get tournament by ID
   async getTournamentById(req, res) {
     try {
-      const tournament = await Tournament.findOne({ _id: req.params.id, status: { $in: [true, "active", "1"] } }).lean();
+      const tournament = await knex("tournaments")
+        .where("id", req.params.id)
+        .where("status", true)
+        .first();
 
       if (!tournament) {
         return apiResponse.ErrorResponse(res, TOURNAMENT.tournamentNotFound);
       }
 
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, { ...tournament, id: tournament._id });
+      return apiResponse.successResponseWithData(
+        res,
+        SUCCESS.dataFound,
+        tournament
+      );
     } catch (error) {
       console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -56,23 +114,26 @@ const tournamentController = {
   // Get tournament matches
   async getTournamentMatches(req, res) {
     try {
-      const matches = await Match.find({
-        tournament: req.params.id,
-        status: { $nin: ["Finished", "Aban."] }
-      })
-        .populate("team1", "name")
-        .populate("team2", "name")
-        .sort({ start_time: 1 })
-        .lean();
+      const matches = await knex("matches")
+        .select(
+          "matches.*",
+          "t1.name as team1_name",
+          "t2.name as team2_name"
+          // 'venues.name as venue_name'
+        )
+        .leftJoin("teams as t1", "matches.team1_id", "t1.id")
+        .leftJoin("teams as t2", "matches.team2_id", "t2.id")
+        // .leftJoin('venues', 'matches.venue_id', 'venues.id')
+        .where("matches.tournament_id", req.params.id)
+        .orderBy("matches.start_time", "asc")
+        .whereNot("matches.status", "Finished" )
+        .whereNot("matches.status", "Aban.")
 
-      const formattedMatches = matches.map(m => ({
-        ...m,
-        id: m._id,
-        team1_name: m.team1?.name,
-        team2_name: m.team2?.name
-      }));
-
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, formattedMatches);
+      return apiResponse.successResponseWithData(
+        res,
+        SUCCESS.dataFound,
+        matches
+      );
     } catch (error) {
       console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);

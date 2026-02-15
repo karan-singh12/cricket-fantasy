@@ -1,36 +1,46 @@
-const User = require("../../models/User");
+const { knex: db } = require("../../config/database");
+const config = require("../../config/config");
 const apiResponse = require("../../utils/apiResponse");
+const { slugGenrator, generateReferralCode } = require("../../utils/functions");
 const { USER, ERROR, SUCCESS, ADMIN } = require("../../utils/responseMsg");
 
 const botUserController = {
   async addBotUser(req, res) {
     try {
-      const { name, email, phone, dob, metadata = {} } = req.body;
+      const { name, email, phone, dob, referral_code, metadata = {}, } = req.body;
 
       if (email) {
-        const emailExists = await User.findOne({ email });
+        const emailExists = await db("users").where("email", email).first();
+
         if (emailExists) {
           return apiResponse.ErrorResponse(res, ADMIN.emailExists);
         }
       }
 
       if (phone) {
-        const phoneExists = await User.findOne({ phone });
+        const phoneExists = await db("users")
+          .where("phone", phone)
+
+          .first();
+
         if (phoneExists) {
           return apiResponse.ErrorResponse(res, USER.phoneExists);
         }
       }
 
-      const newUser = await User.create({
-        name,
-        email,
-        phone,
-        dob,
-        metadata,
-        status: 1,
-        is_bot: true,
-      });
-
+      const [newUser] = await db("users")
+        .insert({
+          name,
+          email,
+          phone,
+          dob,
+          metadata,
+          status: 1,
+          is_bot: true,
+          created_at: db.fn.now(),
+          updated_at: db.fn.now(),
+        })
+        .returning("*");
       return apiResponse.successResponseWithData(res, USER.userAdded, newUser);
     } catch (error) {
       console.error(error);
@@ -40,56 +50,104 @@ const botUserController = {
 
   async getAllBotUser(req, res) {
     try {
-      let {
-        pageSize,
-        pageNumber,
-        searchItem = "",
-        sortBy = "created_at",
-        sortOrder = "desc",
-        status = [],
-      } = req.body;
+      let { pageSize, pageNumber, searchItem = "", sortBy = "created_at", sortOrder = "desc", status = [],} = req.body;
 
-      let filter = { is_bot: true, status: { $ne: 2 } };
+      let query = db("users").whereNot("status", 2).where("is_bot", true);
 
+      // Filter by status if provided
       if (status.length > 0) {
-        filter.status = { $in: status.map(Number) };
+        query.andWhere((qb) => qb.whereIn("status", status));
       }
 
+      // Search functionality
       if (searchItem) {
-        filter.$or = [
-          { name: { $regex: searchItem, $options: "i" } },
-          { email: { $regex: searchItem, $options: "i" } },
-          { phone: { $regex: searchItem, $options: "i" } },
-        ];
+        query.andWhere((builder) =>
+          builder
+            .whereILike("name", `%${searchItem}%`)
+            .orWhereILike("email", `%${searchItem}%`)
+            .orWhereILike("phone", `%${searchItem}%`)
+        );
       }
 
-      const totalRecords = await User.countDocuments(filter);
-
+      // Check if pagination parameters are provided
       const shouldPaginate = pageSize !== undefined && pageNumber !== undefined;
-      let query = User.find(filter)
-        .select(
-          "name email phone status dob is_verified is_name_setup referral_code referred_by social_login_type fb_id google_id apple_id device_id device_type metadata created_at referral_bonus"
-        )
-        .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 });
 
       if (shouldPaginate) {
+        // Handle pagination
         pageSize = parseInt(pageSize) || 10;
         pageNumber = parseInt(pageNumber) || 1;
-        const skip = (pageNumber - 1) * pageSize;
-        query = query.skip(skip).limit(pageSize);
+        const pageOffset = Math.max(0, pageNumber - 1);
+
+        // Get total count
+        const totalRecords = await query.clone().count().first();
+
+        // Get paginated results
+        const result = await query
+          .select(
+            "id",
+            "name",
+            "email",
+            "phone",
+            "status",
+            "dob",
+            "is_verified",
+            "is_name_setup",
+            "referral_code",
+            "referred_by",
+            "social_login_type",
+            "fb_id",
+            "google_id",
+            "apple_id",
+            "device_id",
+            "device_type",
+            "metadata",
+            "created_at",
+            "referral_bonus",
+          )
+          .orderBy(sortBy, sortOrder)
+          .limit(pageSize)
+          .offset(pageSize * pageOffset);
+
+        return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
+          result,
+          totalRecords: parseInt(totalRecords.count),
+          pageNumber: pageNumber,
+          pageSize,
+          paginated: true,
+        });
+      } else {
+        // Return all records when no pagination parameters are provided
+        const result = await query
+          .select(
+            "id",
+            "name",
+            "email",
+            "phone",
+            "status",
+            "dob",
+            "is_verified",
+            "is_name_setup",
+            "referral_code",
+            "referred_by",
+            "social_login_type",
+            "fb_id",
+            "google_id",
+            "apple_id",
+            "device_id",
+            "device_type",
+            "metadata",
+            "created_at"
+          )
+          .orderBy(sortBy, sortOrder);
+
+        return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
+          result,
+          totalRecords: result.length,
+          paginated: false,
+        });
       }
-
-      const result = await query.lean();
-
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
-        result: result.map(u => ({ ...u, id: u._id })),
-        totalRecords,
-        pageNumber: shouldPaginate ? pageNumber : 1,
-        pageSize: shouldPaginate ? pageSize : result.length,
-        paginated: shouldPaginate,
-      });
     } catch (error) {
-      console.error("Error in getAllBotUser:", error.message);
+      console.error("Error in getAllUser:", error.message);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
@@ -97,13 +155,14 @@ const botUserController = {
   async getOneBotUser(req, res) {
     try {
       const { id } = req.params;
-      const user = await User.findById(id).lean();
+
+      const user = await db("users").where({ id }).select("*").first();
 
       if (!user) {
         return apiResponse.ErrorResponse(res, USER.userNotFound);
       }
 
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, { ...user, id: user._id });
+      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, user);
     } catch (error) {
       console.log(error.message);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -112,38 +171,57 @@ const botUserController = {
 
   async updateBotUser(req, res) {
     try {
-      const { id, ...updateFields } = req.body;
+      const { id, imagePath, ...updateFields } = req.body;
+
+      updateFields.updated_at = db.fn.now();
 
       if (req.file) {
         updateFields.image_url = req.file.path.replace(/\\/g, "/");
       }
-
-      const currentUser = await User.findById(id);
+      const currentUser = await db("users").where({ id }).first();
       if (!currentUser) {
         return apiResponse.ErrorResponse(res, USER.userNotFound);
       }
 
       if (updateFields.email && updateFields.email !== currentUser.email) {
-        const emailExists = await User.findOne({ email: updateFields.email, _id: { $ne: id } });
+        const emailExists = await db("users")
+          .where("email", updateFields.email)
+          .whereNot("id", id)
+
+          .first();
+
         if (emailExists) {
           return apiResponse.ErrorResponse(res, ADMIN.emailExists);
         }
       }
 
+      // Check if phone is being updated and already exists (including deleted users)
       if (updateFields.phone && updateFields.phone !== currentUser.phone) {
-        const phoneExists = await User.findOne({ phone: updateFields.phone, _id: { $ne: id } });
+        const phoneExists = await db("users")
+          .where("phone", updateFields.phone)
+          .whereNot("id", id)
+
+          .first();
+
         if (phoneExists) {
           return apiResponse.ErrorResponse(res, USER.phoneNumberExists);
         }
       }
 
-      const updated = await User.findByIdAndUpdate(id, updateFields, { new: true }).lean();
+      const [updated] = await db("users")
+        .where({ id })
+        .update(updateFields)
+        .returning("*");
 
       if (!updated) {
         return apiResponse.ErrorResponse(res, USER.userNotFound);
       }
 
-      return apiResponse.successResponseWithData(res, USER.userUpdated, { ...updated, id: updated._id });
+      return apiResponse.successResponseWithData(
+        res,
+        USER.userUpdated,
+        updated
+      );
     } catch (error) {
       console.log(error.message);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -152,19 +230,27 @@ const botUserController = {
 
   async changeStatus(req, res) {
     try {
-      const { id, status } = req.body;
+      const { id } = req.body;
+      const { status } = req.body;
 
-      if (![0, 1, 2].includes(Number(status))) {
+      if (![0, 1, 2].includes(status)) {
         return apiResponse.ErrorResponse(res, USER.invalidStatusValue);
       }
 
-      const updated = await User.findByIdAndUpdate(id, { status: Number(status) }, { new: true }).lean();
+      const [updated] = await db("users")
+        .where({ id })
+        .update({ status, updated_at: db.fn.now() })
+        .returning("*");
 
       if (!updated) {
         return apiResponse.ErrorResponse(res, USER.userNotFound);
       }
 
-      return apiResponse.successResponseWithData(res, USER.statusUpdated, { ...updated, id: updated._id });
+      return apiResponse.successResponseWithData(
+        res,
+        USER.statusUpdated,
+        updated
+      );
     } catch (error) {
       console.log(error.message);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -175,13 +261,20 @@ const botUserController = {
     try {
       const { id } = req.body;
 
-      const updated = await User.findByIdAndUpdate(id, { status: 2 }, { new: true }).lean();
+      const [updated] = await db("users")
+        .where({ id })
+        .update({ status: 2, updated_at: db.fn.now() })
+        .returning("*");
 
       if (!updated) {
         return apiResponse.ErrorResponse(res, USER.userNotDeleted);
       }
 
-      return apiResponse.successResponseWithData(res, USER.userMarkedAsDeleted, { ...updated, id: updated._id });
+      return apiResponse.successResponseWithData(
+        res,
+        USER.userMarkedAsDeleted,
+        updated
+      );
     } catch (error) {
       console.log(error.message);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);

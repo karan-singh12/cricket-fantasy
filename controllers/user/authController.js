@@ -1,11 +1,14 @@
-const mongoose = require("mongoose");
+const { knex: db } = require("../../config/database");
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
+const bcrypt = require("bcrypt");
 const config = require("../../config/config");
 const { sendEmail } = require("../../utils/email");
 const moment = require("moment");
 const apiResponse = require("../../utils/apiResponse");
 const {
+  slugGenrator,
+  listing,
+  generateReferralCode,
   generateOtp,
   sendOtpToUser,
   sendPushNotificationFCM,
@@ -15,31 +18,9 @@ const {
   USER,
   SUCCESS,
   NOTIFICATION,
-  FOLLOW
 } = require("../../utils/responseMsg");
 const { getLanguage } = require("../../utils/responseMsg");
 const { translateTo } = require("../../utils/google");
-
-// Mongoose Models
-const User = require("../../models/User");
-const Wallet = require("../../models/Wallet");
-const Transaction = require("../../models/Transaction");
-const Notification = require("../../models/Notification");
-const ReferralSetting = require("../../models/ReferralSetting");
-const EmailTemplate = require("../../models/EmailTemplate");
-const Support = require("../../models/Support");
-const FollowUnfollow = require("../../models/FollowUnfollow");
-const BlockUnblock = require("../../models/BlockUnblock");
-const Banner = require("../../models/Banner");
-const Faq = require("../../models/Faq");
-const Cms = require("../../models/Cms");
-const HowToPlay = require("../../models/HowToPlay");
-const Match = require("../../models/Match");
-const Contest = require("../../models/Contest");
-const FantasyGame = require("../../models/FantasyGame");
-const FantasyTeam = require("../../models/FantasyTeam");
-const Team = require("../../models/Team");
-const Tournament = require("../../models/Tournament");
 
 async function translateNotificationText(text, targetLang) {
   if (!targetLang) {
@@ -55,19 +36,19 @@ async function translateNotificationData(notification) {
     getLanguage().toLowerCase() === "hn" ? "hi" : getLanguage().toLowerCase();
 
   return {
-    ...notification.toObject(),
+    ...notification,
     title: await translateNotificationText(notification.title, lang),
     content: await translateNotificationText(notification.content, lang),
   };
 }
 
 async function getReferralSettings() {
-  const settings = await ReferralSetting.findOne({ is_active: true });
+  const settings = await db("referral_settings").first();
   if (!settings) {
     return {
-      is_active: false,
-      referrer_bonus: 0,
-      referee_bonus: 0,
+      is_active: false, // or throw error
+      referrer_bonus: null,
+      referee_bonus: null,
       max_referrals_per_user: 0,
       min_referee_verification: true,
       bonus_currency: "BDT",
@@ -76,108 +57,133 @@ async function getReferralSettings() {
   return settings;
 }
 
-async function processReferralBonus(session, referrer, referee, settings) {
+async function processReferralBonus(trx, referrer, referee) {
   try {
-    const referrerBonus = settings.referrer_bonus || 0;
-    const refereeBonus = settings.referee_bonus || 0;
-    const currency = settings.bonus_currency || "BDT";
-
-    if (referrerBonus > 0) {
-      // Update Referrer Wallet
-      let referrerWallet = await Wallet.findOne({ user: referrer._id }).session(session);
-      if (!referrerWallet) {
-        referrerWallet = new Wallet({
-          user: referrer._id,
-          balance: 0,
-          currency,
-        });
-      }
-      referrerWallet.balance += referrerBonus;
-      await referrerWallet.save({ session });
-
-      // Update Referrer User
-      referrer.wallet_balance = referrerWallet.balance;
-      await referrer.save({ session });
-
-      // Create Transaction
-      await Transaction.create([{
-        user: referrer._id,
-        title: "referral_bonus",
-        amount: referrerBonus,
-        currency,
-        status: "SUCCESS",
-        transactionType: "referral_bonus",
-      }], { session });
-
-      // Referrer Notification
-      const referrerTemplate = await EmailTemplate.findOne({
-        slug: "Referral-Code-Used",
-        status: 1,
-      }).session(session); // Note: Templates might not be created in session, but reading is fine.
-
-      if (referrerTemplate) {
-        const title = referrerTemplate.title || "Referral Code Used!";
-        const content = (referrerTemplate.content || "").replace(
-          "{{referee_email}}",
-          referee.email || "a new user"
-        );
-
-        await Notification.create([{
-          user: referrer._id,
-          title,
-          content,
-          is_read: false,
-        }], { session });
-      }
+    // Ensure admin assigned bonus
+    if (!referrer || !referee || !referrer.referral_bonus) {
+      console.log("Referral inactive: missing referrer/referee/bonus");
+      return;
     }
 
-    if (refereeBonus > 0) {
-      // Update Referee Wallet
-      let refereeWallet = await Wallet.findOne({ user: referee._id }).session(session);
-      if (!refereeWallet) {
-        refereeWallet = new Wallet({
-          user: referee._id,
-          balance: 0,
-          currency,
-        });
-      }
-      refereeWallet.balance += refereeBonus;
-      await refereeWallet.save({ session });
+    const referrerBonus = parseFloat(referrer.referral_bonus);
+    const refereeBonus = parseFloat(referrer.referral_bonus);
+    const currency = "BDT";
 
-      // Update Referee User
-      referee.wallet_balance = refereeWallet.balance;
-      referee.referred_by = referrer._id;
-      await referee.save({ session });
-
-      // Create Transaction
-      await Transaction.create([{
-        user: referee._id,
-        title: "referral_bonus",
-        amount: refereeBonus,
+    // --- Referrer Wallet ---
+    let referrerWallet = await trx("wallet")
+      .where("user_id", referrer.id)
+      .first();
+    if (!referrerWallet) {
+      await trx("wallet").insert({
+        user_id: referrer.id,
+        balance: 0.0,
         currency,
-        status: "SUCCESS",
-        transactionType: "referral_bonus",
-      }], { session });
-
-      // Referee Notification
-      const refereeTemplate = await EmailTemplate.findOne({
-        slug: "Referral-Bonus-Received",
-        status: 1,
+        created_at: trx.fn.now(),
+        updated_at: trx.fn.now(),
       });
+      referrerWallet = { balance: 0 };
+    }
+    const newRefBalance = parseFloat(referrerWallet.balance) + referrerBonus;
+    await trx("wallet")
+      .where("user_id", referrer.id)
+      .update({ balance: newRefBalance.toFixed(2), updated_at: trx.fn.now() });
+    await trx("users")
+      .where("id", referrer.id)
+      .update({
+        wallet_balance: newRefBalance.toFixed(2),
+        updated_at: trx.fn.now(),
+      });
+    await trx("transactions").insert({
+      user_id: referrer.id,
+      title: "referral_bonus",
+      amount: referrerBonus,
+      currency,
+      status: "SUCCESS",
+      transactionType: "referral_bonus",
+      created_at: trx.fn.now(),
+      updated_at: trx.fn.now(),
+    });
 
-      if (refereeTemplate) {
-        const title = refereeTemplate.title || "Referral Bonus Received!";
-        const content = (refereeTemplate.content || "")
-          .replace("{{bonusAmount}}", refereeBonus.toFixed(2))
-          .replace("{{currency}}", currency);
+    // --- Referee Wallet ---
+    let refereeWallet = await trx("wallet")
+      .where("user_id", referee.id)
+      .first();
+    if (!refereeWallet) {
+      await trx("wallet").insert({
+        user_id: referee.id,
+        balance: 0.0,
+        currency,
+        created_at: trx.fn.now(),
+        updated_at: trx.fn.now(),
+      });
+      refereeWallet = { balance: 0 };
+    }
+    const newRefereeBalance = parseFloat(refereeWallet.balance) + refereeBonus;
+    await trx("wallet")
+      .where("user_id", referee.id)
+      .update({
+        balance: newRefereeBalance.toFixed(2),
+        updated_at: trx.fn.now(),
+      });
+    await trx("users")
+      .where("id", referee.id)
+      .update({
+        wallet_balance: newRefereeBalance.toFixed(2),
+        referred_by: referrer.id,
+        updated_at: trx.fn.now(),
+      });
+    await trx("transactions").insert({
+      user_id: referee.id,
+      title: "referral_bonus",
+      amount: refereeBonus,
+      currency,
+      status: "SUCCESS",
+      transactionType: "referral_bonus",
+      created_at: trx.fn.now(),
+      updated_at: trx.fn.now(),
+    });
 
-        await Notification.create([{
-          user: referee._id,
-          title,
-          content,
-          is_read: false,
-        }], { session });
-      }
+    // Referrer Notification
+    const referrerTemplate = await trx("notification_templates")
+      .where({ slug: "Referral-Code-Used", status: 1 })
+      .first();
+
+    if (referrerTemplate) {
+      const title = referrerTemplate.title || "Referral Code Used!";
+      const content = (referrerTemplate.content || "").replace(
+        "{{referee_email}}",
+        referee.email || "a new user"
+      );
+
+      await trx("notifications").insert({
+        user_id: referrer.id,
+        title,
+        content,
+        is_read: false,
+        sent_at: trx.fn.now(),
+        created_at: trx.fn.now(),
+      });
+    }
+
+    // Referee Notification
+    const refereeTemplate = await trx("notification_templates")
+      .where({ slug: "Referral-Bonus-Received", status: 1 })
+      .first();
+
+    if (refereeTemplate) {
+      const title = refereeTemplate.title || "Referral Bonus Received!";
+      const content = (refereeTemplate.content || "")
+        .replace("{{bonusAmount}}", refereeBonus.toFixed(2))
+        .replace("{{currency}}", currency);
+
+      await trx("notifications").insert({
+        user_id: referee.id,
+        title,
+        content,
+        is_read: false,
+        sent_at: trx.fn.now(),
+        created_at: trx.fn.now(),
+      });
     }
   } catch (error) {
     console.error("Error in processReferralBonus:", error);
@@ -196,236 +202,204 @@ const userAuthController = {
 
       email = email?.trim().toLowerCase();
       const isEmailLogin = !!email;
-      const otp = generateOtp();
+      const otp = isEmailLogin ? generateOtp() : generateOtp();
+      const condition = isEmailLogin
+        ? db.raw("LOWER(email) = ?", [email])
+        : { phone };
 
-      const condition = isEmailLogin ? { email } : { phone };
+      let user = await db("users")
+        .where(condition)
+        .andWhere("status", 1)
+        .first();
 
-      // Find user (ignoring status for now to check inactive/deleted)
-      let user = await User.findOne(condition);
+      if (!user) {
+        const inactiveUser = await db("users")
+          .where(condition)
+          .andWhere("status", 0)
+          .first();
 
-      if (user) {
-        if (user.status === 0) {
+        if (inactiveUser) {
           return apiResponse.ErrorResponse(
             res,
             "This account is inactive by admin, please contact to admin"
           );
         }
-        // if (user.status === 2) { ... }
 
-        // Update user
-        if (ftoken) user.ftoken = ftoken;
-        user.otp = otp;
-        user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
-        await user.save();
-      } else {
-        // Create new user
-        // Note: For simple login/signup flow, we might just create it. 
-        // Original code handled creation if not found.
-
-        user = new User({
-          ...condition,
+        //   if (deletedUser) {
+        //     return apiResponse.ErrorResponse(res,
+        //   "This account has already deleted please create account again.",
+        // );
+        //   }
+        const insertData = {
+          // referral_code: generateReferralCode(),
+          created_at: db.fn.now(),
+          updated_at: db.fn.now(),
           status: 1,
-          ftoken,
-          otp,
-          otp_expires: new Date(Date.now() + 10 * 60 * 1000)
-        });
-        await user.save();
+          ...(email && { email }),
+          ...(phone && { phone }),
+          ...(ftoken && { ftoken }),
+        };
+
+        [user] = await db("users").insert(insertData).returning("*");
+      } else {
+        const updateFields = {
+          updated_at: db.fn.now(),
+        };
+        if (ftoken !== undefined && ftoken !== null && ftoken.trim() !== "") {
+          updateFields.ftoken = ftoken;
+        }
+
+        // if (!user.referral_code) {
+        //   updateFields.referral_code = generateReferralCode();
+        // }
+
+        await db("users").where({ id: user.id }).update(updateFields);
+        user = await db("users").where({ id: user.id }).first();
       }
 
-      // Send OTP
+      const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+      await db("users").where({ id: user.id }).update({
+        otp,
+        otp_expires: otpExpires,
+        updated_at: db.fn.now(),
+      });
+
       if (isEmailLogin) {
-        const template = await EmailTemplate.findOne({ slug: "Send-OTP", status: 1 });
+        const template = await db("emailtemplates")
+          .where({ slug: "Send-OTP", status: 1 })
+          .select("subject", "content")
+          .first();
+
         const subject = template?.subject || "Your One-Time Password (OTP)";
-        const html = template ? require("../../utils/functions").replaceTemplateVars(template.content, { email, otp }) : `<p>Your One-Time Password (OTP) is: <strong>${otp}</strong></p>`;
+        const html = template
+          ? require("../../utils/functions").replaceTemplateVars(
+              template.content,
+              { email, otp }
+            )
+          : `<p>Your One-Time Password (OTP) is: <strong>${otp}</strong></p>`;
 
         await sendOtpToUser({ email, otp, subject, html });
       } else {
         await sendOtpToUser({ phone, otp });
       }
 
-      return apiResponse.successResponseWithData(res, isEmailLogin ? USER.otpSentEmail : USER.otpSentNumber, { otp });
+      return apiResponse.successResponseWithData(
+        res,
+        isEmailLogin ? USER.otpSentEmail : USER.otpSentNumber,
+        { otp }
+      );
     } catch (error) {
       console.error("Login error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-
-  async updateEmail(req, res) {
-    try {
-      const { email } = req.body;
-      if (!email) return apiResponse.ErrorResponse(res, "Email is required");
-
-      const exists = await User.findOne({ email: email.trim().toLowerCase() });
-      if (exists) return apiResponse.ErrorResponse(res, ERROR.emailAlreadyInUse);
-
-      const otp = generateOtp();
-      await User.findByIdAndUpdate(req.user.id, {
-        otp,
-        otp_expires: new Date(Date.now() + 10 * 60 * 1000)
-      });
-
-      const template = await EmailTemplate.findOne({ slug: "Send-OTP", status: 1 });
-      const subject = template?.subject || "Verify Your New Email";
-      const html = template ? require("../../utils/functions").replaceTemplateVars(template.content, { email, otp }) : `<p>Your OTP is: <strong>${otp}</strong></p>`;
-
-      await sendOtpToUser({ email, otp, subject, html });
-      return apiResponse.successResponse(res, USER.otpSentEmail);
-    } catch (error) {
-      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-    }
-  },
-
-  async verifyEmail(req, res) {
-    try {
-      const { email, otp } = req.body;
-      const user = await User.findById(req.user.id);
-
-      if (!user) return apiResponse.ErrorResponse(res, USER.userNotFound);
-      if (user.otp !== otp) return apiResponse.ErrorResponse(res, USER.otpNotMatched);
-      if (user.otp_expires && new Date(user.otp_expires) < new Date()) {
-        return apiResponse.ErrorResponse(res, USER.otpExpired);
-      }
-
-      user.email = email.trim().toLowerCase();
-      user.otp = null;
-      user.otp_expires = null;
-      await user.save();
-
-      return apiResponse.successResponse(res, "Email updated successfully");
-    } catch (error) {
-      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-    }
-  },
-
-  async getFaqs(req, res) {
-    try {
-      const faqs = await Faq.find({ status: 1 }).sort({ order: 1 });
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, faqs);
-    } catch (error) {
-      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-    }
-  },
-
-  async getAboutUs(req, res) {
-    try {
-      const path = req.originalUrl || req.path;
-      let slug = "about-us";
-      if (path.includes("getTerms")) slug = "terms-and-conditions";
-      else if (path.includes("getPrivacy")) slug = "privacy-policy";
-      else if (path.includes("getLicenceInformation")) slug = "licence-information";
-
-      const content = await Cms.findOne({ slug, status: 1 });
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, content);
-    } catch (error) {
-      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-    }
-  },
-
-  async getBanners(req, res) {
-    try {
-      const banners = await Banner.find({
-        status: 1,
-        start_date: { $lte: new Date() },
-        end_date: { $gte: new Date() }
-      });
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, banners);
-    } catch (error) {
-      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-    }
-  },
-
-  async getHowtoPlay(req, res) {
-    try {
-      const content = await HowToPlay.find({ status: true });
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, content);
-    } catch (error) {
-      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-    }
-  },
-
-  async getReferralCode(req, res) {
-    try {
-      const user = await User.findById(req.user.id).select("referral_code");
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, user);
-    } catch (error) {
-      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-    }
-  },
-
-  async deleteAccount(req, res) {
-    try {
-      await User.findByIdAndUpdate(req.user.id, { status: 2 });
-      return apiResponse.successResponse(res, "Account deleted successfully");
-    } catch (error) {
-      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-    }
-  },
-
   async socialLogin(req, res) {
     try {
-      const { email, name, socialLoginType, deviceId, deviceType, googleId, invite_code, ftoken } = req.body;
-
+      const {
+        email,
+        name,
+        socialLoginType,
+        deviceId,
+        deviceType,
+        googleId,
+        invite_code,
+        ftoken,
+      } = req.body;
       if (!email || !googleId || !socialLoginType) {
-        return apiResponse.ErrorResponse(res, USER.emailGoogleIdSocialLoginTypeRequired);
+        return apiResponse.ErrorResponse(
+          res,
+          USER.emailGoogleIdSocialLoginTypeRequired
+        );
       }
 
-      let user = await User.findOne({ email });
+      let user = await db("users")
+        .where(function () {
+          this.where("email", email);
+        })
+        .first();
 
+      let isNewUser = false;
       if (!user || user.status === 2) {
-        if (!user) user = new User();
-
-        user.email = email;
-        user.name = name;
-        user.google_id = googleId;
-        user.social_login_type = socialLoginType;
-        user.device_id = deviceId;
-        user.device_type = deviceType;
-        user.ftoken = ftoken || null;
-        user.is_name_setup = !!name;
-        user.is_verified = true;
-        user.status = 1;
-
-        await user.save();
+        // const referral_code = generateReferralCode();
+        [user] = await db("users")
+          .insert({
+            email,
+            name,
+            google_id: googleId,
+            social_login_type: socialLoginType,
+            device_id: deviceId,
+            device_type: deviceType,
+            ftoken: ftoken || null,
+            is_name_setup: !!name,
+            is_verified: true,
+            // referral_code,
+            status: 1,
+            created_at: db.fn.now(),
+            updated_at: db.fn.now(),
+          })
+          .returning("*");
+        isNewUser = true;
       } else {
-        user.google_id = googleId;
-        user.social_login_type = socialLoginType;
-        user.device_id = deviceId;
-        user.device_type = deviceType;
-        user.is_name_setup = !!name;
-        if (ftoken) user.ftoken = ftoken;
-        await user.save();
+        let updateData = {
+          google_id: googleId,
+          social_login_type: socialLoginType,
+          device_id: deviceId,
+          device_type: deviceType,
+          is_name_setup: !!name,
+          updated_at: db.fn.now(),
+        };
+        if (ftoken) {
+          updateData.ftoken = ftoken;
+        }
+        // if (!user.referral_code) {
+        //   updateData.referral_code = generateReferralCode();
+        // }
+        await db("users").where({ id: user.id }).update(updateData);
+        user = await db("users").where({ id: user.id }).first();
       }
 
-      let userWallet = await Wallet.findOne({ user: user._id });
+      let userWallet = await db("wallet").where("user_id", user.id).first();
       if (!userWallet) {
-        await Wallet.create({ user: user._id, balance: 0 });
+        await db("wallet").insert({
+          user_id: user.id,
+          balance: 0.0,
+          currency: "BDT",
+          created_at: db.fn.now(),
+          updated_at: db.fn.now(),
+        });
+        userWallet = { balance: 0 };
       }
 
       if (invite_code && !user.referred_by) {
-        const referrer = await User.findOne({ referral_code: invite_code });
+        const referrer = await db("users")
+          .where("referral_code", invite_code)
+          .first();
         if (!referrer) {
           return apiResponse.ErrorResponse(res, USER.invalidInviteCode);
         }
 
-        const session = await mongoose.startSession();
-        session.startTransaction();
-        try {
-          const settings = await getReferralSettings();
-          await processReferralBonus(session, referrer, user, settings);
-          await session.commitTransaction();
-        } catch (err) {
-          await session.abortTransaction();
-          console.error("Referral bonus failed", err);
-        } finally {
-          session.endSession();
+        if (!referrer.referral_bonus) {
+          return apiResponse.ErrorResponse(
+            res,
+            "This referral code is inactive. Please use a valid one."
+          );
         }
+
+        await db.transaction(async (trx) => {
+          await processReferralBonus(trx, referrer, user);
+        });
+
+        user = await db("users").where({ id: user.id }).first();
       }
 
-      const token = jwt.sign({ id: user._id, role: "user" }, config.jwtSecret, {
+      const token = jwt.sign({ id: user.id, role: "user" }, config.jwtSecret, {
         expiresIn: "180d"
       });
 
-      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, { token, user });
+      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
+        token,
+        user,
+      });
     } catch (error) {
       console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
@@ -434,12 +408,24 @@ const userAuthController = {
 
   async updateFtoken(req, res) {
     try {
+      const userId = req.user.id;
       const { ftoken } = req.body;
-      if (!ftoken || !ftoken.trim()) return apiResponse.ErrorResponse(res, "ftoken is required");
 
-      await User.findByIdAndUpdate(req.user.id, { ftoken: ftoken.trim() });
-      return apiResponse.successResponse(res, "Device token updated successfully");
+      if (!ftoken || ftoken.trim() === "") {
+        return apiResponse.ErrorResponse(res, "ftoken is required");
+      }
+
+      await db("users").where({ id: userId }).update({
+        ftoken: ftoken.trim(),
+        updated_at: db.fn.now(),
+      });
+
+      return apiResponse.successResponse(
+        res,
+        "Device token updated successfully"
+      );
     } catch (error) {
+      console.error("Error updating ftoken:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
@@ -452,67 +438,130 @@ const userAuthController = {
         return apiResponse.ErrorResponse(res, ERROR.EmailPhoneOTPisRequired);
       }
 
-      let condition = email ? { email: email.trim().toLowerCase() } : { phone };
-      let user = await User.findOne(condition).and([{ status: 1 }]);
+      let data;
+      if (email) {
+        email = email.trim().toLowerCase();
+        data = await db("users")
+          .whereRaw("LOWER(email) = ?", [email])
+          .andWhere("status", 1)
+          .first();
+      } else {
+        data = await db("users").where({ phone }).andWhere("status", 1).first();
+      }
 
-      if (!user) return apiResponse.ErrorResponse(res, USER.accountNotExists);
-      if (user.otp !== otp) return apiResponse.ErrorResponse(res, USER.otpNotMatched);
-      if (user.otp_expires && new Date(user.otp_expires) < new Date()) {
+      if (!data) return apiResponse.ErrorResponse(res, USER.accountNotExists);
+      if (data.otp !== otp)
+        return apiResponse.ErrorResponse(res, USER.otpNotMatched);
+
+      const now = new Date();
+      if (!data.otp_expires || new Date(data.otp_expires) < now) {
         return apiResponse.ErrorResponse(res, USER.otpExpired);
       }
 
-      if (invite_code && user.referred_by) {
+      if (invite_code && data.referred_by) {
         return apiResponse.ErrorResponse(res, USER.alreadyUsedInviteCode);
       }
 
       let referrer = null;
       if (invite_code) {
-        referrer = await User.findOne({ referral_code: invite_code });
-        if (!referrer) return apiResponse.ErrorResponse(res, USER.invalidInviteCode);
-        if (user.referred_by) return apiResponse.ErrorResponse(res, USER.alreadyUsedInviteCode);
-      }
+        referrer = await db("users")
+          .where("referral_code", invite_code)
+          .first();
 
-      const session = await mongoose.startSession();
-      session.startTransaction();
-      try {
-        user.is_verified = true;
-        user.otp = null;
-        user.otp_expires = null;
-        await user.save({ session });
-
-        // Ensure wallet
-        let wallet = await Wallet.findOne({ user: user._id }).session(session);
-        if (!wallet) {
-          await Wallet.create([{ user: user._id, balance: 0 }], { session });
+        if (!referrer) {
+          return apiResponse.ErrorResponse(res, USER.invalidInviteCode);
         }
 
-        if (referrer && !user.referred_by) {
+        if (!referrer.referral_code || !referrer.referral_bonus) {
+          return apiResponse.ErrorResponse(
+            res,
+            "This referral code is inactive. Please use a valid one."
+          );
+        }
+
+        if (data.referred_by) {
+          return apiResponse.ErrorResponse(res, USER.alreadyUsedInviteCode);
+        }
+      }
+
+      const verifiedUser = await db.transaction(async (trx) => {
+        await trx("users").where("id", data.id).update({
+          is_verified: true,
+          otp: null,
+          otp_expires: null,
+          updated_at: trx.fn.now(),
+        });
+        const updatedUser = await trx("users").where("id", data.id).first();
+
+        let userWallet = await trx("wallet").where("user_id", data.id).first();
+        if (!userWallet) {
+          await trx("wallet").insert({
+            user_id: data.id,
+            balance: 0.0,
+            currency: "BDT",
+            created_at: trx.fn.now(),
+            updated_at: trx.fn.now(),
+          });
+          userWallet = { balance: 0 };
+        }
+
+        if (referrer && !data.referred_by) {
           const settings = await getReferralSettings();
-          await processReferralBonus(session, referrer, user, settings);
+
+          // 🚫 require referral_bonus to be set
+          if (!referrer.referral_bonus) {
+            throw new Error(
+              "Referral bonus not set for this referral code. Contact admin."
+            );
+          }
+
+          // Override with Admin-defined bonus
+          settings.referrer_bonus = referrer.referral_bonus;
+          settings.referee_bonus = referrer.referral_bonus;
+
+          await processReferralBonus(trx, referrer, updatedUser, settings);
         }
 
-        await session.commitTransaction();
-      } catch (err) {
-        await session.abortTransaction();
-        throw err;
-      } finally {
-        session.endSession();
-      }
+        return await trx("users").where("id", data.id).first();
+      });
 
-      // Notifications (outside transaction for simplicity)
       if (referrer && referrer.ftoken) {
-        sendPushNotificationFCM(referrer.ftoken, "Referral Bonus", "Your referral code was used!");
+        try {
+          await sendPushNotificationFCM(
+            referrer.ftoken,
+            "Referral Bonus",
+            `Your referral code was used by ${
+              data.email || data.phone
+            }. You've earned a bonus!`
+          );
+        } catch (pushError) {
+          console.error("FCM push failed:", pushError);
+        }
       }
-      if (user.ftoken) {
-        sendPushNotificationFCM(user.ftoken, "Referral Bonus", "Welcome bonus received!");
+      if (verifiedUser.ftoken) {
+        try {
+          await sendPushNotificationFCM(
+            verifiedUser.ftoken,
+            "Referral Bonus",
+            `You used a referral code and received a bonus! Welcome aboard.`
+          );
+        } catch (pushError) {
+          console.error("FCM push failed for referee:", pushError);
+        }
       }
 
-      const token = jwt.sign({ id: user._id, role: "user" }, config.jwtSecret, { expiresIn: "180d" });
+      const token = jwt.sign(
+        { id: verifiedUser.id, role: "user" },
+        config.jwtSecret,
+        { expiresIn: "180d" } // 6 months
+      );
 
-      return apiResponse.successResponseWithData(res, USER.otpVerified, { token, user });
-
+      return apiResponse.successResponseWithData(res, USER.otpVerified, {
+        token,
+        user: verifiedUser,
+      });
     } catch (error) {
-      console.error(error);
+      console.error("OTP verification error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
@@ -520,21 +569,26 @@ const userAuthController = {
   async changePassword(req, res) {
     try {
       const { currentPassword, newPassword } = req.body;
-      const user = await User.findById(req.user.id);
+
+      const user = await db("users").where("id", req.user.id).first();
 
       if (!user || !user.password) {
-        return apiResponse.ErrorResponse(res, USER.userOrPasswordNotFound);
+        return res.status(400).json({ error: USER.userOrPasswordNotFound });
       }
 
       const isMatch = await bcrypt.compare(currentPassword, user.password);
       if (!isMatch) {
-        return apiResponse.ErrorResponse(res, USER.currentPasswordIncorrect);
+        return res.status(401).json({ error: USER.currentPasswordIncorrect });
       }
 
-      user.password = newPassword;
-      await user.save();
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-      return apiResponse.successResponse(res, USER.passwordUpdatedSuccessfully);
+      await db("users").where("id", req.user.id).update({
+        password: hashedPassword,
+        updated_at: db.fn.now(),
+      });
+
+      res.json({ message: USER.passwordUpdatedSuccessfully });
     } catch (error) {
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
@@ -544,44 +598,61 @@ const userAuthController = {
     try {
       const { message, type, name, email, from } = req.body;
 
-      if (!message) return apiResponse.ErrorResponse(res, ERROR.messageRequired);
+      if (!message) {
+        return apiResponse.ErrorResponse(res, ERROR.messageRequired);
+      }
       if (from === "Website") {
-        if (!name) return apiResponse.ErrorResponse(res, "Name is Required.");
-        if (!email) return apiResponse.ErrorResponse(res, "Email is Required.");
-        if (!type) return apiResponse.ErrorResponse(res, "Type is Required");
+        if (!name) {
+          return apiResponse.ErrorResponse(res, "Name is Required.");
+        }
+        if (!email) {
+          return apiResponse.ErrorResponse(res, "Email is Required.");
+        }
+        if (!type) {
+          return apiResponse.ErrorResponse(res, "Type is Required");
+        }
+        if (!message) {
+          return apiResponse.ErrorResponse(res, "Message is Required");
+        }
       }
 
-      await Support.create({
-        user: req.user ? req.user.id : null,
+      await db("support").insert({
+        user_id: req?.user?.id || null,
         message,
         name,
         email,
         from,
         type,
-        status: 1
+        status: 1,
+        created_at: db.fn.now(),
+        updated_at: db.fn.now(),
       });
+      const template = await db("emailtemplates")
+        .where({ slug: "send-query-admin", status: 1 })
+        .first();
 
-      // Send email to admin
-      const template = await EmailTemplate.findOne({ slug: "send-query-admin", status: 1 });
       if (template) {
-        // Assuming social links or admin email logic exists, defaulting to hardcoded or env
-        const adminEmail = process.env.ADMIN_EMAIL || "admin@example.com";
-        const htmlContent = template.content
-          .replace("{{name}}", name)
-          .replace("{{email}}", email)
-          .replace("{{type}}", type)
-          .replace("{{message}}", message);
+        const socialLink = await db("social_links").first();
+        const adminEmail = socialLink?.email;
 
-        await sendEmail({
-          to: adminEmail,
-          subject: template.subject || "New Contact Us Submission",
-          html: htmlContent
-        });
+        if (adminEmail) {
+          const htmlContent = template.content
+            .replace("{{name}}", name)
+            .replace("{{email}}", email)
+            .replace("{{type}}", type)
+            .replace("{{message}}", message);
+
+          await sendOtpToUser({
+            email: adminEmail,
+            subject: template.subject || "New Contact Us Submission",
+            html: htmlContent,
+          });
+        }
       }
 
       return apiResponse.successResponseWithData(res, USER.contactUsSubmitted);
     } catch (error) {
-      console.error(error);
+      console.error("Contact us error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
@@ -589,27 +660,50 @@ const userAuthController = {
   async forgotPassword(req, res) {
     try {
       const { email } = req.body;
-      const user = await User.findOne({ email });
 
-      if (!user) return res.status(404).json({ error: USER.accountNotExists });
+      const user = await db("users").where("email", email).first();
 
-      const resetToken = jwt.sign({ id: user._id }, config.jwtSecret, { expiresIn: "1h" });
-      user.reset_password_token = resetToken;
-      user.reset_password_expires = new Date(Date.now() + 3600000);
-      await user.save();
+      if (!user) {
+        return res.status(404).json({ error: USER.accountNotExists });
+      }
 
-      const template = await EmailTemplate.findOne({ slug: "user-forgot-password", status: 1 });
+      const resetToken = jwt.sign({ id: user.id }, config.jwtSecret, {
+        expiresIn: "1h",
+      });
 
-      if (template) {
-        let content = template.content
-          .replace(/{{name}}/g, user.name)
-          .replace(/{{resetLink}}/g, `${config.appUrl}/reset-password/${resetToken}`);
-
-        await sendEmail({
-          to: user.email,
-          subject: template.subject,
-          html: content
+      await db("users")
+        .where("id", user.id)
+        .update({
+          reset_password_token: resetToken,
+          reset_password_expires: new Date(Date.now() + 3600000),
+          updated_at: db.fn.now(),
         });
+
+      const templateResult = await knex("emailtemplates")
+        .select("content", "subject")
+        .where({
+          slug: "user-forgot-password",
+          status: 1,
+        })
+        .first();
+
+      if (templateResult) {
+        let content = templateResult.content;
+
+        // placeholders replace करो
+        content = content.replace(/{{name}}/g, user.name);
+        content = content.replace(
+          /{{resetLink}}/g,
+          `${config.appUrl}/reset-password/${resetToken}`
+        );
+
+        const options = {
+          to: user.email,
+          subject: templateResult.subject,
+          html: content,
+        };
+
+        await sendEmail(options);
       }
 
       res.json({ message: USER.otpReSentEmail });
@@ -622,186 +716,283 @@ const userAuthController = {
   async resetPassword(req, res) {
     try {
       const { token, newPassword } = req.body;
-      const user = await User.findOne({
-        reset_password_token: token,
-        reset_password_expires: { $gt: new Date() }
+
+      const user = await db("users")
+        .where("reset_password_token", token)
+        .where("reset_password_expires", ">", new Date())
+        .first();
+
+      if (!user) {
+        return res.status(400).json({ error: USER.invalidOrExpireToken });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      await db("users").where("id", user.id).update({
+        password: hashedPassword,
+        reset_password_token: null,
+        reset_password_expires: null,
+        updated_at: db.fn.now(),
       });
-
-      if (!user) return res.status(400).json({ error: USER.invalidOrExpireToken });
-
-      user.password = newPassword;
-      user.reset_password_token = undefined;
-      user.reset_password_expires = undefined;
-      await user.save();
 
       res.json({ message: USER.passwordResetSuccessfully });
     } catch (error) {
+      console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-
+  // non login user resend otp
   async resendOtp(req, res) {
     try {
       const { email, phone } = req.body;
-      if (!email && !phone) return apiResponse.ErrorResponse(res, USER.emailOrPhoneRequired);
 
-      const condition = email ? { email: email.trim().toLowerCase() } : { phone };
-      const user = await User.findOne(condition);
+      if (!email && !phone) {
+        return apiResponse.ErrorResponse(res, USER.emailOrPhoneRequired);
+      }
 
-      if (!user) return apiResponse.ErrorResponse(res, USER.accountNotExists);
+      const normalizedEmail = email?.trim().toLowerCase();
+      const isEmailRequest = !!normalizedEmail;
 
-      const newOtp = generateOtp();
-      user.otp = newOtp;
-      user.otp_expires = new Date(Date.now() + 5 * 60 * 1000);
-      await user.save();
+      const condition = isEmailRequest
+        ? db.raw("LOWER(email) = ?", [normalizedEmail])
+        : { phone };
 
-      if (email) {
-        const template = await EmailTemplate.findOne({ slug: "Send-OTP", status: 1 });
+      const user = await db("users").where(condition).first();
+
+      if (!user) {
+        return apiResponse.ErrorResponse(res, USER.accountNotExists);
+      }
+
+      const newOtp = isEmailRequest ? generateOtp() : "1234";
+      const otpExpires = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+      await db("users").where({ id: user.id }).update({
+        otp: newOtp,
+        otp_expires: otpExpires,
+        updated_at: db.fn.now(),
+      });
+
+      if (isEmailRequest) {
+        const template = await db("emailtemplates")
+          .where({ slug: "Send-OTP", status: 1 })
+          .select("subject", "content")
+          .first();
+
         const subject = template?.subject || "Your One-Time Password (OTP)";
         const html = template
-          ? require("../../utils/functions").replaceTemplateVars(template.content, { email, otp: newOtp })
-          : `<p>OTP: ${newOtp}</p>`;
+          ? require("../../utils/functions").replaceTemplateVars(
+              template.content,
+              {
+                email: normalizedEmail,
+                otp: newOtp,
+              }
+            )
+          : `<p>Your One-Time Password (OTP) is: <strong>${newOtp}</strong></p>`;
 
-        await sendOtpToUser({ email, otp: newOtp, subject, html });
+        await sendOtpToUser({
+          email: normalizedEmail,
+          otp: newOtp,
+          subject,
+          html,
+        });
       } else {
         await sendOtpToUser({ phone, otp: newOtp });
       }
 
       return apiResponse.successResponseWithData(
         res,
-        email ? USER.otpReSentEmail : USER.otpReSentNumber, // Assuming message keys
-        { otp: newOtp }
+        "OTP resend successfully",
+        {
+          otp: newOtp,
+        }
       );
     } catch (error) {
-      console.error(error);
+      console.error("Resend OTP error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-
+  // login user resend otp
   async resendAuthOtp(req, res) {
     try {
       const { email, phone } = req.body;
-      if (!email && !phone) return apiResponse.ErrorResponse(res, ERROR.EmailPhoneisRequired);
+
+      if (!email && !phone) {
+        return apiResponse.ErrorResponse(res, ERROR.EmailPhoneisRequired);
+      }
 
       const normalizedEmail = email?.trim().toLowerCase();
       const isEmail = !!normalizedEmail;
-      const newOtp = generateOtp();
-      const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
 
-      const user = await User.findByIdAndUpdate(req.user.id, {
-        otp: newOtp,
-        otp_expires: otpExpires,
-        updated_at: Date.now()
-      }, { new: true });
+      const newOtp = isEmail ? generateOtp() : generateOtp();
+      const otpExpires = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+      const [updatedUser] = await db("users")
+        .where("id", req.user.id)
+        .update({
+          otp: newOtp,
+          otp_expires: otpExpires,
+          updated_at: db.fn.now(),
+        })
+        .returning("*");
 
       if (isEmail) {
-        const template = await EmailTemplate.findOne({ slug: "Send-OTP", status: 1 });
+        const template = await db("emailtemplates")
+          .where({ slug: "Send-OTP", status: 1 })
+          .select("subject", "content")
+          .first();
+
         const subject = template?.subject || "Your One-Time Password (OTP)";
         const html = template
-          ? require("../../utils/functions").replaceTemplateVars(template.content, { email: normalizedEmail, otp: newOtp })
-          : `<p>OTP: ${newOtp}</p>`;
-        await sendOtpToUser({ email: normalizedEmail, otp: newOtp, subject, html });
+          ? require("../../utils/functions").replaceTemplateVars(
+              template.content,
+              {
+                email: normalizedEmail,
+                otp: newOtp,
+              }
+            )
+          : `<p>Your One-Time Password (OTP) is: <strong>${newOtp}</strong></p>`;
+
+        await sendOtpToUser({
+          email: normalizedEmail,
+          otp: newOtp,
+          subject,
+          html,
+        });
       } else {
         await sendOtpToUser({ phone, otp: newOtp });
       }
 
-      return apiResponse.successResponseWithData(res, isEmail ? USER.otpReSentEmail : USER.otpReSentNumber, { otp: newOtp });
+      return apiResponse.successResponseWithData(
+        res,
+        email ? USER.otpReSentEmail : USER.otpReSentNumber,
+        {
+          otp: newOtp,
+        }
+      );
     } catch (error) {
+      console.error("Resend Auth OTP error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
 
   async getProfile(req, res) {
     try {
-      const user = await User.findById(req.user.id).select("-password -otp -reset_password_token");
-      if (!user) return apiResponse.ErrorResponse(res, USER.accountNotExists);
+      const user = await db("users")
+        .where("id", req.user.id)
+        .select("*")
+        .first();
+
+      if (!user) {
+        return apiResponse.ErrorResponse(res, USER.accountNotExists);
+      }
 
       const [followersCount, followingCount] = await Promise.all([
-        FollowUnfollow.countDocuments({ following: req.user.id }),
-        FollowUnfollow.countDocuments({ follower: req.user.id })
+        db("follow_unfollow")
+          .where("following_id", req.user.id)
+          .count("* as count")
+          .first(),
+        db("follow_unfollow")
+          .where("follower_id", req.user.id)
+          .count("* as count")
+          .first(),
       ]);
 
-      user._doc.followers_count = followersCount;
-      user._doc.following_count = followingCount;
+      user.followers_count = parseInt(followersCount.count) || 0;
+      user.following_count = parseInt(followingCount.count) || 0;
 
-      // Lists
-      const followersList = await FollowUnfollow.find({ following: req.user.id }).select("follower");
-      const followingList = await FollowUnfollow.find({ follower: req.user.id }).select("following");
-      user._doc.followers_list = followersList.map(f => f.follower);
-      user._doc.following_list = followingList.map(f => f.following);
+      const [followersList, followingList] = await Promise.all([
+        db("follow_unfollow")
+          .where("following_id", req.user.id)
+          .select("following_id"),
 
-      // Stats
-      const contestsCount = await FantasyGame.distinct("contest", { user: req.user.id }).length || await FantasyGame.countDocuments({ user: req.user.id }); // distinct count might need aggregation
-      // Actually .distinct() returns array, so .length
-      const distinctContests = await FantasyGame.distinct("contest", { user: req.user.id });
-
-      const distinctMatches = await FantasyTeam.distinct("match", { user: req.user.id });
-
-      // Series Count (complex join)
-      // We can iterate matches to count tournaments or use aggregation on Matches
-      const matches = await Match.find({ _id: { $in: distinctMatches } }).select("tournament");
-      const distinctSeries = new Set(matches.map(m => m.tournament.toString()));
-
-      const winningsAgg = await FantasyGame.aggregate([
-        { $match: { user: new mongoose.Types.ObjectId(req.user.id), rank: { $gt: 0 } } },
-        {
-          $lookup: {
-            from: "contests",
-            localField: "contest",
-            foreignField: "_id",
-            as: "contest"
-          }
-        },
-        { $unwind: "$contest" },
-        // Calculate winnings logic here is hard in Mongo Aggregation if keys are dynamic. 
-        // For now, assuming winnings are stored in FantasyGame model as well (which I added: winnings field)
-        // If not, we rely on the schema field I created: `winnings: { type: Number, default: 0 }` in FantasyGame.
-        // The migration script or logic needs to populate this. 
-        // I will trust the `winnings` field in FantasyGame for now.
-        {
-          $group: {
-            _id: null,
-            contests_won: { $sum: 1 },
-            total_winnings: { $sum: "$winnings" }
-          }
-        }
+        db("follow_unfollow")
+          .where("follower_id", req.user.id)
+          .select("follower_id"),
       ]);
 
-      const pointsAgg = await FantasyTeam.aggregate([
-        { $match: { user: new mongoose.Types.ObjectId(req.user.id) } },
-        { $group: { _id: null, total_points: { $sum: "$total_points" } } }
-      ]);
+      user.followers_list = followersList || [];
+      user.following_list = followingList || [];
 
-      const bestRankDoc = await FantasyGame.findOne({ user: req.user.id, rank: { $ne: null } }).sort({ rank: 1 });
+      const contestsResult = await db("fantasy_games")
+        .where("user_id", req.user.id)
+        .countDistinct("contest_id as count")
+        .first();
+      const contestsCount = parseInt(contestsResult.count) || 0;
 
-      const referralBonusAgg = await Transaction.aggregate([
-        { $match: { user: new mongoose.Types.ObjectId(req.user.id), transactionType: "referral_bonus" } },
-        { $group: { _id: null, total: { $sum: "$amount" } } }
-      ]);
+      const matchesResult = await db("fantasy_teams")
+        .where("user_id", req.user.id)
+        .countDistinct("match_id as count")
+        .first();
+      const matchesCount = parseInt(matchesResult.count) || 0;
 
-      const contestsWon = winningsAgg[0]?.contests_won || 0;
-      const totalWinnings = winningsAgg[0]?.total_winnings || 0;
+      const seriesResult = await db("fantasy_teams as ft")
+        .join("matches as m", "ft.match_id", "m.id")
+        .where("ft.user_id", req.user.id)
+        .countDistinct("m.tournament_id as count")
+        .first();
+      const seriesCount = parseInt(seriesResult.count) || 0;
 
-      const winPercentage = distinctContests.length > 0 ? Math.round((contestsWon / distinctContests.length) * 100) : 0;
+      const winningsResult = await db("fantasy_games as fg")
+        .join("contests as c", "fg.contest_id", "c.id")
+        .where("fg.user_id", req.user.id)
+        .where("fg.rank", ">", 0)
+        .select(
+          db.raw("COUNT(*) as contests_won"),
+          db.raw(`
+            SUM(
+              CASE 
+                WHEN fg.rank = 1 AND c.winnings IS NOT NULL THEN 
+                  (c.winnings->>'1')::numeric 
+                WHEN fg.rank = 2 AND c.winnings IS NOT NULL THEN 
+                  (c.winnings->>'2')::numeric
+                WHEN fg.rank = 3 AND c.winnings IS NOT NULL THEN 
+                  (c.winnings->>'3')::numeric
+                ELSE 0 
+              END
+            ) as total_winnings
+          `)
+        )
+        .first();
 
-      user._doc.careerStats = {
+      const pointsResult = await db("fantasy_teams")
+        .where("user_id", req.user.id)
+        .sum("total_points as total_points")
+        .first();
+
+      const bestRankResult = await db("fantasy_games")
+        .where("user_id", req.user.id)
+        .whereNotNull("rank")
+        .min("rank as best_rank")
+        .first();
+      const referralBonusResult = await db("transactions")
+        .where("user_id", req.user.id)
+        .andWhere("transactionType", "referral_bonus")
+        .sum("amount as total_referral_bonus")
+        .first();
+
+      const winPercentage =
+        contestsCount > 0
+          ? Math.round((winningsResult.contests_won / contestsCount) * 100)
+          : 0;
+
+      user.careerStats = {
         contests: {
-          total: distinctContests.length,
-          won: contestsWon,
-          winPercentage,
-          totalWinnings
+          total: contestsCount,
+          won: parseInt(winningsResult.contests_won) || 0,
+          winPercentage: winPercentage,
+          totalWinnings: parseFloat(winningsResult.total_winnings) || 0,
         },
         matches: {
-          total: distinctMatches.length,
-          totalPoints: pointsAgg[0]?.total_points || 0,
-          bestRank: bestRankDoc?.rank || null
+          total: matchesCount,
+          totalPoints: parseFloat(pointsResult.total_points) || 0,
+          bestRank: parseInt(bestRankResult.best_rank) || null,
         },
         series: {
-          total: distinctSeries.size
-        }
+          total: seriesCount,
+        },
       };
-
-      user._doc.referralBonus = referralBonusAgg[0]?.total || 0;
+      user.referralBonus =
+        parseFloat(referralBonusResult.total_referral_bonus) || 0;
 
       return apiResponse.successResponseWithData(res, SUCCESS.dataFound, user);
     } catch (error) {
@@ -813,423 +1004,1319 @@ const userAuthController = {
   async updateProfile(req, res) {
     try {
       const { name, email, dob, phone, gender } = req.body;
-      const user = await User.findById(req.user.id);
-
-      if (!user) return res.status(404).json({ error: "User not found" });
-      if (user.status !== 1) return res.status(400).json({ error: "Only active accounts can update profile" });
-
+      const updateData = { updated_at: db.fn.now() };
+      const userid = req.user.id;
       const updatedFields = [];
 
+      const currentUser = await db("users").where({ id: userid }).first();
+
+      if (!currentUser) {
+        return res.status(404).json({
+          error: "User not found",
+        });
+      }
+      if (currentUser.status !== 1) {
+        return res.status(400).json({
+          error: "Only active accounts can update profile",
+        });
+      }
       if (email) {
-        const normEmail = email.trim().toLowerCase();
-        if (normEmail !== user.email) {
-          const exists = await User.findOne({ email: normEmail, _id: { $ne: user._id } });
-          if (exists) return res.status(400).json({ error: ERROR.emailAlreadyInUse });
-          user.email = normEmail;
+        const normalizedEmail = email.trim().toLowerCase();
+
+        // Only check uniqueness if email is different from current user's email
+        if (normalizedEmail !== req.user.email.toLowerCase().trim()) {
+          const existingUserWithEmail = await db("users")
+            .where({ email: normalizedEmail })
+            .whereNot("id", userid)
+            .first(); // Check across ALL statuses
+
+          if (existingUserWithEmail) {
+            return res.status(400).json({
+              error: ERROR.emailAlreadyInUse,
+            });
+          }
+          updateData.email = normalizedEmail;
           updatedFields.push("email");
+        } else {
+          console.log(
+            `Email ${normalizedEmail} is the same as current user's email, skipping update`
+          );
         }
       }
 
-      if (phone && phone !== user.phone) {
-        const exists = await User.findOne({ phone: phone, _id: { $ne: user._id } });
-        if (exists) return res.status(400).json({ error: ERROR.phoneAlreadyInUse });
-        user.phone = phone;
+      // Check phone uniqueness if provided
+      if (phone && phone !== currentUser.phone) {
+        const existingUserWithPhone = await db("users")
+          .where({ phone })
+          .whereNot("id", userid)
+          .first(); // Check across ALL statuses
+
+        if (existingUserWithPhone) {
+          return res.status(400).json({
+            error: ERROR.phoneAlreadyInUse,
+          });
+        }
+        updateData.phone = phone;
         updatedFields.push("phone number");
       }
 
-      if (name) {
-        user.name = name.trim().replace(/\s+/g, " ");
-        user.is_name_setup = true;
+      if (name !== undefined) {
+        updateData.name = name.trim().replace(/\s+/g, " ");
+        updateData.is_name_setup = true;
         updatedFields.push("name");
       }
-      if (dob) {
-        user.dob = dob; // ensure dob field in schema if needed
+      if (dob !== undefined) {
+        updateData.dob = dob;
         updatedFields.push("date of birth");
       }
-      if (gender) {
-        user.gender = gender; // ensure gender field in schema
+      if (gender !== undefined) {
+        updateData.gender = gender;
         updatedFields.push("gender");
       }
       if (req.file) {
-        user.image_url = req.file.path.replace(/\\/g, "/");
+        updateData.image_url = req.file.path.replace(/\\/g, "/");
         updatedFields.push("profile picture");
       }
 
-      if (updatedFields.length === 0) return apiResponse.ErrorResponse(res, ERROR.noFieldsToUpdate);
+      // Check if there are fields to update
+      if (Object.keys(updateData).length <= 1) {
+        return apiResponse.ErrorResponse(res, ERROR.noFieldsToUpdate);
+      }
 
-      await user.save();
+      // Update the user
+      const [user] = await db("users")
+        .where({ id: userid, status: 1 })
+        .update(updateData)
+        .returning("*");
 
-      // Notifications logic
-      let title = "Profile Updated";
-      let content = "Your profile has been successfully updated.";
-      // ... simplified notification logic ... 
+      if (!user) {
+        return res.status(400).json({
+          error: "No active user found with the provided ID",
+        });
+      }
 
-      await Notification.create({
-        user: user._id,
-        title,
-        content,
+      // Generate notification
+      let notificationTitle = "Profile Updated";
+      let notificationContent = "Your profile has been successfully updated.";
+
+      if (email || phone) {
+        notificationTitle =
+          email && phone
+            ? "Email and Phone Update Verification"
+            : email
+            ? "Email Update Verification"
+            : "Phone Update Verification";
+        notificationContent = `Please verify your ${
+          email && phone ? "email and phone" : email ? "email" : "phone"
+        } with the OTP sent.`;
+      } else if (updatedFields.length === 1) {
+        const field = updatedFields[0];
+        notificationTitle = `${
+          field.charAt(0).toUpperCase() + field.slice(1)
+        } Updated`;
+        notificationContent = `Your ${field} has been successfully updated.`;
+      } else if (updatedFields.length > 1) {
+        const lastField = updatedFields.pop();
+        const fieldsList = updatedFields.length
+          ? `${updatedFields.join(", ")} and ${lastField}`
+          : lastField;
+        notificationTitle = "Profile Information Updated";
+        notificationContent = `Your ${fieldsList} have been successfully updated.`;
+      }
+
+      await db("notifications").insert({
+        user_id: userid,
+        title: notificationTitle,
+        content: notificationContent,
+        is_read: false,
+        sent_at: db.fn.now(),
+        created_at: db.fn.now(),
       });
-    }
-    catch (error) {
+
+      return apiResponse.successResponseWithData(res, notificationTitle, user);
+    } catch (error) {
       console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
 
-  async getNotifications(req, res) {
+  async updateEmail(req, res) {
     try {
-      const { pageSize = 10, pageNumber = 1, readStatus = null } = req.body; // pageNumber 1-based
-      const limit = parseInt(pageSize);
-      const skip = (parseInt(pageNumber) - 1) * limit;
+      const { email, phone } = req.body;
+      console.log("Request Body:", req.body);
 
-      const query = { user: req.user.id };
-      if (readStatus !== null) query.is_read = readStatus;
+      if (!email && !phone) {
+        return apiResponse.ErrorResponse(res, USER.emailOrPhoneRequired);
+      }
 
-      // "sent_at <= now" logic is implicit if we only create notifications to be sent immediately.
-      // If we support scheduled, we add sent_at: { $lte: new Date() }
+      const normalizedEmail = email?.trim().toLowerCase();
+      const isEmailUpdate = !!normalizedEmail;
+      const isPhoneUpdate = !!phone;
 
-      const totalRecords = await Notification.countDocuments(query);
-      const notifications = await Notification.find(query)
-        .sort({ sent_at: -1, created_at: -1 })
-        .skip(skip)
-        .limit(limit);
+      const currentUser = await db("users").where({ id: req.user.id }).first();
 
-      const today = moment().startOf("day");
-      const yesterday = moment().subtract(1, "days").startOf("day");
+      if (!currentUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
 
-      const grouped = { Today: [], Yesterday: [], Older: [] };
+      if (currentUser.status !== 1) {
+        return res.status(400).json({
+          error: "Only active accounts can update email or phone",
+        });
+      }
 
-      // Translations done in parallel
-      const translated = await Promise.all(notifications.map(n => translateNotificationData(n)));
+      // Duplicate checks
+      if (isEmailUpdate && normalizedEmail !== currentUser.email) {
+        const existingUserWithEmail = await db("users")
+          .where({ email: normalizedEmail })
+          .whereNot("id", req.user.id)
+          .first();
+        if (existingUserWithEmail) {
+          return res.status(400).json({ error: ERROR.emailAlreadyInUse });
+        }
+      }
 
-      translated.forEach(n => {
-        const createdAt = moment(n.sent_at || n.created_at);
-        let timeAgo = createdAt.fromNow(); // using moment's fromNow for simplicity or custom logic
+      if (isPhoneUpdate && phone !== currentUser.phone) {
+        const existingUserWithPhone = await db("users")
+          .where({ phone })
+          .whereNot("id", req.user.id)
+          .first();
+        if (existingUserWithPhone) {
+          return res.status(400).json({ error: ERROR.phoneAlreadyInUse });
+        }
+      }
 
-        const notifData = {
-          id: n._id.toString(),
-          title: n.title,
-          time: timeAgo,
-          content: n.content,
-          is_read: n.is_read
-        };
+      // Generate OTP
+      const otp = generateOtp();
+      const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-        if (createdAt.isSame(today, "day")) grouped.Today.push(notifData);
-        else if (createdAt.isSame(yesterday, "day")) grouped.Yesterday.push(notifData);
-        else grouped.Older.push(notifData);
+      // Prepare update data
+      const updateData = {
+        otp,
+        otp_expires: otpExpires,
+        updated_at: db.fn.now(),
+      };
+      if (isEmailUpdate) updateData.email = normalizedEmail;
+      if (isPhoneUpdate) updateData.phone = phone;
+
+      // Update user
+      const [updatedUser] = await db("users")
+        .where({ id: req.user.id, status: 1 })
+        .update(updateData)
+        .returning("*");
+
+      // Fallback to currentUser if update did not change anything
+      const finalUser = updatedUser || currentUser;
+
+      // Send OTP
+      if (isEmailUpdate) {
+        const template = await db("emailtemplates")
+          .where({ slug: "Send-OTP", status: 1 })
+          .select("subject", "content")
+          .first();
+
+        const subject = template?.subject || "Your One-Time Password (OTP)";
+        const html = template
+          ? require("../../utils/functions").replaceTemplateVars(
+              template.content,
+              {
+                email: normalizedEmail,
+                otp,
+              }
+            )
+          : `<p>Your One-Time Password (OTP) is: <strong>${otp}</strong></p>`;
+
+        await sendOtpToUser({ email: normalizedEmail, otp, subject, html });
+      }
+
+      if (isPhoneUpdate) {
+        await sendOtpToUser({ phone, otp });
+      }
+
+      return apiResponse.successResponseWithData(
+        res,
+        isEmailUpdate && isPhoneUpdate
+          ? "OTP sent for email and phone update verification"
+          : isEmailUpdate
+          ? "OTP sent for email update verification"
+          : "OTP sent for phone update verification",
+        { otp }
+      );
+    } catch (error) {
+      console.error("Update email error:", error);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
+
+  async verifyEmail(req, res) {
+    try {
+      const { email, phone, otp } = req.body;
+
+      // At least one of email or phone is required
+      if ((!email && !phone) || !otp) {
+        return apiResponse.ErrorResponse(res, USER.emailOrPhoneOTPisRequired);
+      }
+
+      const data = await db("users").where("id", req.user.id).first();
+
+      if (!data) {
+        return apiResponse.ErrorResponse(res, USER.accountNotExists);
+      }
+
+      // Check if OTP matches
+      if (data.otp !== otp) {
+        return apiResponse.ErrorResponse(res, USER.otpNotMatched);
+      }
+
+      // Check if OTP is expired
+      const now = new Date();
+      if (!data.otp_expires || new Date(data.otp_expires) < now) {
+        return apiResponse.ErrorResponse(res, USER.otpExpired);
+      }
+
+      const insertData = {
+        otp: null,
+        otp_expires: null,
+        updated_at: db.fn.now(),
+      };
+
+      if (email) insertData.email = email;
+      if (phone) insertData.phone = phone;
+
+      // OTP valid — update user verification status
+      const [updatedUser] = await db("users")
+        .where("id", req.user.id)
+        .update(insertData)
+        .returning("*");
+
+      const slug = email ? "Email-Updated" : "Phone-Updated";
+      const template = await db("notification_templates")
+        .where({ slug, status: 1 })
+        .first();
+
+      let title = email ? "Email Updated" : "Phone Number Updated";
+      let content = email
+        ? `Your email has been successfully updated to ${email}.`
+        : `Your phone number has been successfully updated to ${phone}.`;
+
+      if (template) {
+        title = template.title || title;
+        content = template.content
+          .replace("{{email}}", email || "")
+          .replace("{{phone}}", phone || "");
+      }
+
+      // Insert DB notification
+      await db("notifications").insert({
+        user_id: req.user.id,
+        title,
+        content,
+        is_read: false,
+        sent_at: db.fn.now(),
+        created_at: db.fn.now(),
       });
 
-      const result = [];
-      if (grouped.Today.length) result.push({ title: "Today", data: grouped.Today });
-      if (grouped.Yesterday.length) result.push({ title: "Yesterday", data: grouped.Yesterday });
-      if (grouped.Older.length) result.push({ title: "Older", data: grouped.Older });
+      // ✅ Send FCM push
+      if (updatedUser.ftoken) {
+        try {
+          await sendPushNotificationFCM(updatedUser.ftoken, title, content);
+        } catch (pushError) {
+          console.error("❌ FCM push failed:", pushError);
+        }
+      }
 
-      return apiResponse.successResponseWithData(res, NOTIFICATION.notificationfetched, { result, totalRecords, pageNumber, pageSize });
+      // Generate JWT token after successful verification
+      const token = jwt.sign({ id: data.id, role: "user" }, config.jwtSecret, {
+        expiresIn: "24h",
+      });
+
+      const user = await db("users")
+        .where("id", req.user.id)
+        .first()
+        .returning("*");
+
+      return apiResponse.successResponseWithData(res, USER.otpVerified, {
+        token,
+        user,
+      });
     } catch (error) {
+      console.error(error);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
+
+  async getAboutUs(req, res) {
+    try {
+      let condition = { status: 1 };
+
+      if (req.url == "/getTerms") {
+        condition.slug = process.env.TERMS;
+      } else if (req.url == "/getPrivacy") {
+        condition.slug = process.env.PRIVACY_POLICY;
+      } else if (req.url == "/getHowToPlay") {
+        condition.slug = process.env.HOW_TO_PLAY;
+      } else if (req.url == "/getCommunityGuidelines") {
+        condition.slug = process.env.COMMUNITY_GUIDELINES;
+      } else if (req.url == "/getLicenceInformation") {
+        condition.slug = process.env.LICENSE_INFORMATION;
+      } else {
+        condition.slug = process.env.ABOUT_US;
+      }
+
+      //Find content details
+      const content = await db("cms").where(condition).select("*").first();
+
+      return apiResponse.successResponseWithData(
+        res,
+        SUCCESS.dataFound,
+        content
+      );
+    } catch (error) {
+      console.error(error);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
+
+  async getBanners(req, res) {
+    try {
+      let condition = { status: 1 };
+
+      const today = new Date();
+
+      const content = await db("banner")
+        .where(condition)
+        .andWhere("start_date", "<=", today)
+        .andWhere("end_date", ">=", today)
+        .select("*");
+
+      return apiResponse.successResponseWithData(
+        res,
+        SUCCESS.dataFound,
+        content
+      );
+    } catch (error) {
+      console.error(error);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
+  async getHowtoPlay(req, res) {
+    try {
+      const result = await db("how_to_play")
+        .where({ status: true })
+        .orderBy("created_at", "desc");
+
+      const transformedData = {
+        tabs: [],
+        tabData: {},
+        banners: [],
+      };
+
+      result.forEach((tab) => {
+        transformedData.tabs.push(tab.tab);
+
+        if (tab.banner_image) {
+          transformedData.banners.push(tab.banner_image);
+        }
+
+        // Parse the stored JSON data
+        const dataObj =
+          typeof tab.data === "string" ? JSON.parse(tab.data) : tab.data;
+
+        if (dataObj.sections && dataObj.sections.length > 0) {
+          transformedData.tabData[tab.tab] = dataObj.sections.map((section) => {
+            const accordion = {
+              id: section.title.toLowerCase().replace(/\s+/g, "-"),
+              title: section.title,
+              content: {},
+            };
+
+            // Points → "important"
+            if (section.points && section.points.length > 0) {
+              accordion.content.important = section.points.map((point) => ({
+                label: point.label,
+                value: point.value,
+                ...(point.note && { note: point.note }),
+              }));
+            }
+
+            // Dropdowns → only added dropdowns
+            if (
+              section.dropdowns &&
+              Object.keys(section.dropdowns).length > 0
+            ) {
+              Object.entries(section.dropdowns).forEach(([key, value]) => {
+                if (Array.isArray(value)) {
+                  // For new format where dropdown itself is an array
+                  accordion.content[key] = value.map((item) => ({
+                    label: item.label,
+                    value: item.value,
+                  }));
+                } else if (value.items && value.items.length > 0) {
+                  // Old format with { name, items }
+                  accordion.content[value.name] = value.items.map((item) => ({
+                    label: item.label,
+                    value: item.value,
+                  }));
+                }
+              });
+            }
+
+            // Content → "rules"
+            if (section.content && section.content.length > 0) {
+              accordion.content.rules = section.content.map((text) => {
+                const parts = text.split(":");
+                return {
+                  label: parts[0]?.trim(),
+                  value: parts[1]?.trim() || "",
+                };
+              });
+            }
+
+            return accordion;
+          });
+        }
+      });
+
+      return apiResponse.successResponseWithData(
+        res,
+        SUCCESS.dataFound,
+        transformedData
+      );
+    } catch (err) {
+      console.error(err);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
+
+  async getFaqs(req, res) {
+    try {
+      let condition = { status: 1 };
+
+      //Find content details
+      const data = await db("faq").where(condition).select("*");
+
+      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, data);
+    } catch (error) {
+      console.error(error);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
+
+  async getReferralCode(req, res) {
+    try {
+      const user = await db("users")
+        .where("id", req.user.id)
+        .select("id", "referral_code")
+        .first();
+
+      if (!user) {
+        return apiResponse.ErrorResponse(res, USER.accountNotExists);
+      }
+
+      return apiResponse.successResponseWithData(res, SUCCESS.dataFound, user);
+    } catch (error) {
+      console.error(error);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
+
+  async deleteAccount(req, res) {
+    try {
+      const user = await db("users")
+        .where("id", req.user.id)
+        .update({ status: 2, updated_at: db.fn.now() })
+        .returning("*");
+
+      return apiResponse.successResponseWithData(
+        res,
+        USER.accountDeleted,
+        user
+      );
+    } catch (error) {
+      console.error(error);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
+  async getNotifications(req, res) {
+    try {
+      const { pageSize = 10, pageNumber = 1, readStatus = null } = req.body;
+      const offset = (pageNumber - 1) * pageSize;
+  
+      // base query
+      const baseQuery = db("notifications").where("user_id", req.user.id);
+  
+      if (readStatus !== null) {
+        baseQuery.andWhere("is_read", readStatus);
+      }
+  
+      baseQuery.andWhere(function () {
+        this.where(function () {
+          this.whereNull("status").andWhere("sent_at", "<=", db.fn.now());
+        }).orWhere(function () {
+          this.where("status", true).andWhere("sent_at", "<=", db.fn.now());
+        });
+      });
+  
+      // total records count
+      const totalResult = await baseQuery.clone().count("* as total").first();
+      const totalRecords = totalResult ? parseInt(totalResult.total) : 0;
+  
+      // fetch paginated notifications
+      const notifications = await baseQuery
+        .clone()
+        .select("id", "title", "content", "is_read", "created_at", "sent_at")
+        .orderByRaw("COALESCE(sent_at, created_at) DESC")
+        .limit(pageSize)
+        .offset(offset);
+  
+      const today = moment().startOf("day");
+      const yesterday = moment().subtract(1, "days").startOf("day");
+  
+      const grouped = {
+        Today: [],
+        Yesterday: [],
+        Older: [],
+      };
+  
+      const translatedNotifications = await Promise.all(
+        notifications.map(async (notification) => {
+          const displayTime = notification.sent_at || notification.created_at;
+          const createdAt = moment(displayTime);
+  
+          const now = moment();
+          const diffMinutes = now.diff(createdAt, "minutes");
+          const diffHours = now.diff(createdAt, "hours");
+          const diffDays = now.diff(createdAt, "days");
+  
+          let timeAgo;
+          if (diffMinutes < 60) {
+            timeAgo = `${diffMinutes} min ago`;
+          } else if (diffHours < 24) {
+            timeAgo = `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
+          } else {
+            timeAgo = `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+          }
+  
+          const translated = await translateNotificationData(notification);
+  
+          const notifData = {
+            id: notification.id.toString(),
+            title: translated.title,
+            time: timeAgo,
+            content: translated.content,
+            is_read: notification.is_read,
+          };
+  
+          if (createdAt.isSame(today, "day")) {
+            grouped.Today.push(notifData);
+          } else if (createdAt.isSame(yesterday, "day")) {
+            grouped.Yesterday.push(notifData);
+          } else {
+            grouped.Older.push(notifData);
+          }
+  
+          return notifData;
+        })
+      );
+  
+      const result = [];
+      if (grouped.Today.length)
+        result.push({ title: "Today", data: grouped.Today });
+      if (grouped.Yesterday.length)
+        result.push({ title: "Yesterday", data: grouped.Yesterday });
+      if (grouped.Older.length)
+        result.push({ title: "Older", data: grouped.Older });
+  
+      return apiResponse.successResponseWithData(
+        res,
+        NOTIFICATION.notificationfetched,
+        { result, totalRecords, pageNumber, pageSize }
+      );
+    } catch (error) {
+      console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.NoDataFound);
     }
   },
+  
 
   async readNotification(req, res) {
     try {
       const { id } = req.body;
-      if (!id) return apiResponse.ErrorResponse(res, NOTIFICATION.notificationIDRequired);
 
-      const notif = await Notification.findOneAndUpdate(
-        { _id: id, user: req.user.id },
-        { is_read: true, read_at: Date.now() },
-        { new: true }
+      if (!id) {
+        return apiResponse.ErrorResponse(
+          res,
+          NOTIFICATION.notificationIDRequired
+        );
+      }
+
+      // First check if notification exists
+      const notification = await db("notifications")
+        .where({
+          id: id,
+          user_id: req.user.id,
+        })
+        .first();
+
+      if (!notification) {
+        return apiResponse.ErrorResponse(
+          res,
+          NOTIFICATION.notificationNotFound
+        );
+      }
+
+      const updatedRows = await db("notifications")
+        .where({
+          id: id,
+          user_id: req.user.id,
+        })
+        .update({
+          is_read: true,
+          read_at: db.fn.now(),
+        })
+        .returning("*");
+
+      const translatedNotification = await translateNotificationData(
+        updatedRows[0]
       );
 
-      if (!notif) return apiResponse.ErrorResponse(res, NOTIFICATION.notificationNotFound);
-
-      const translated = await translateNotificationData(notif);
-      return apiResponse.successResponseWithData(res, NOTIFICATION.notificationRead, translated);
+      return apiResponse.successResponseWithData(
+        res,
+        NOTIFICATION.notificationRead,
+        {
+          ...translatedNotification,
+          id: updatedRows[0].id,
+          user_id: updatedRows[0].user_id,
+          is_read: updatedRows[0].is_read,
+          sent_at: updatedRows[0].sent_at,
+          read_at: updatedRows[0].read_at,
+          created_at: updatedRows[0].created_at,
+          status: updatedRows[0].status,
+          match_id: updatedRows[0].match_id,
+        }
+      );
     } catch (error) {
+      console.error("Error in readNotification:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-
   async markAllAsRead(req, res) {
     try {
-      const result = await Notification.updateMany(
-        { user: req.user.id, is_read: false },
-        { is_read: true, read_at: Date.now() }
+      const updatedRows = await db("notifications")
+        .where({
+          user_id: req.user.id,
+          is_read: false,
+        })
+        .update({
+          is_read: true,
+          read_at: db.fn.now(),
+        });
+
+      if (!updatedRows || updatedRows.length === 0) {
+        return apiResponse.ErrorResponse(
+          res,
+          NOTIFICATION.notificationNotFound
+        );
+      }
+      return apiResponse.successResponse(
+        res,
+        NOTIFICATION.allNotificationsMarkedRead
       );
-      if (result.matchedCount === 0) return apiResponse.ErrorResponse(res, NOTIFICATION.notificationNotFound);
-      return apiResponse.successResponse(res, NOTIFICATION.allNotificationsMarkedRead);
     } catch (error) {
+      console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-
   async updatesetisNotification(req, res) {
-    // User schema permission field? Need to ensure it exists.
-    // Assuming User model structure allows dynamic fields or we add 'permission'
     try {
-      const user = await User.findById(req.user.id);
-      if (!user) return apiResponse.ErrorResponse(res, USER.userNotFound);
+      const userId = req.user.id;
 
-      let permissions = user.permission || {}; // Might need to add Mixed type or permissions schema
-      const current = permissions.set_isNotification === true;
+      const user = await db("users").where("id", userId).first("permission");
 
-      // Mongoose Mixed type update requires markModified if not replacing object
-      if (!user.permission) user.permission = {};
-      user.permission.set_isNotification = !current;
-      user.markModified('permission');
-      await user.save();
+      if (!user) {
+        return apiResponse.ErrorResponse(res, USER.userNotFound);
+      }
 
-      const message = !current ? NOTIFICATION.notificationsmarkedtrue : NOTIFICATION.notificationsmarkedfalse;
+      let permissions = user.permission || {};
+
+      const currentValue = permissions.set_isNotification === true;
+      permissions.set_isNotification = !currentValue;
+
+      await db("users").where("id", userId).update({
+        permission: permissions,
+        updated_at: db.fn.now(),
+      });
+
+      const message = permissions.set_isNotification
+        ? NOTIFICATION.notificationsmarkedtrue
+        : NOTIFICATION.notificationsmarkedfalse;
+
       return apiResponse.successResponse(res, message);
     } catch (err) {
+      console.error("Error updating notification settings:", err);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-
   async followUnfollow(req, res) {
     try {
       const { following_id, action } = req.body;
       const follower_id = req.user.id;
 
-      if (!following_id) return apiResponse.ErrorResponse(res, FOLLOW.followingUserIDRequired);
-      if (follower_id === following_id) return apiResponse.ErrorResponse(res, FOLLOW.cannotFollowYourself);
+      if (!following_id) {
+        return apiResponse.ErrorResponse(res, FOLLOW.followingUserIDRequired);
+      }
 
-      // Check Block
-      const blocked = await BlockUnblock.findOne({
-        $or: [
-          { blocker: follower_id, blocked: following_id },
-          { blocker: following_id, blocked: follower_id }
-        ]
-      });
-      if (blocked) return apiResponse.ErrorResponse(res, FOLLOW.cannotFollowBlockedUser);
+      if (follower_id === following_id) {
+        return apiResponse.ErrorResponse(res, FOLLOW.cannotFollowYourself);
+      }
 
-      const targetUser = await User.findById(following_id);
-      if (!targetUser) return apiResponse.ErrorResponse(res, USER.userNotFound);
+      const blockCheck = await db("block_unblock")
+        .where(function () {
+          this.where({
+            blocker_id: follower_id,
+            blocked_id: following_id,
+          }).orWhere({
+            blocker_id: following_id,
+            blocked_id: follower_id,
+          });
+        })
+        .first();
 
-      const existing = await FollowUnfollow.findOne({ follower: follower_id, following: following_id });
+      if (blockCheck) {
+        return apiResponse.ErrorResponse(res, FOLLOW.cannotFollowBlockedUser);
+      }
+
+      const userToFollow = await db("users").where("id", following_id).first();
+      if (!userToFollow) {
+        return apiResponse.ErrorResponse(res, USER.userNotFound);
+      }
+
+      const existingFollow = await db("follow_unfollow")
+        .where({
+          follower_id: follower_id,
+          following_id: following_id,
+        })
+        .first();
 
       if (action === "follow") {
-        if (existing) return apiResponse.ErrorResponse(res, `You already follow ${targetUser.name}`);
-        await FollowUnfollow.create({ follower: follower_id, following: following_id });
-        return apiResponse.successResponse(res, `You followed ${targetUser.name}`);
+        if (existingFollow) {
+          return apiResponse.ErrorResponse(
+            res,
+            `You already follow ${userToFollow.name}`
+          );
+        }
+
+        await db("follow_unfollow").insert({
+          follower_id: follower_id,
+          following_id: following_id,
+          created_at: db.fn.now(),
+          updated_at: db.fn.now(),
+        });
+
+        return apiResponse.successResponse(
+          res,
+          `You followed ${userToFollow.name}`
+        );
       } else if (action === "unfollow") {
-        if (!existing) return apiResponse.ErrorResponse(res, `You are not following ${targetUser.name}`);
-        await FollowUnfollow.deleteOne({ _id: existing._id });
-        return apiResponse.successResponse(res, `You unfollowed ${targetUser.name}`);
+        if (!existingFollow) {
+          return apiResponse.ErrorResponse(
+            res,
+            `You are not following ${userToFollow.name}`
+          );
+        }
+
+        await db("follow_unfollow")
+          .where({
+            follower_id: follower_id,
+            following_id: following_id,
+          })
+          .del();
+
+        return apiResponse.successResponse(
+          res,
+          `You unfollowed ${userToFollow.name}`
+        );
       } else {
         return apiResponse.ErrorResponse(res, FOLLOW.Invalidaction);
       }
     } catch (error) {
+      console.error("Follow/Unfollow error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-
   async blockUnblock(req, res) {
     try {
       const { blocked_id, action } = req.body;
       const blocker_id = req.user.id;
 
-      if (!blocked_id) return apiResponse.ErrorResponse(res, FOLLOW.Blockeduseridrequired);
-      if (blocker_id === blocked_id) return apiResponse.ErrorResponse(res, FOLLOW.cannotblockyourself);
+      if (!blocked_id) {
+        return apiResponse.ErrorResponse(res, FOLLOW.Blockeduseridrequired);
+      }
 
-      const targetUser = await User.findById(blocked_id);
-      if (!targetUser) return apiResponse.ErrorResponse(res, USER.userNotFound);
+      if (blocker_id === blocked_id) {
+        return apiResponse.ErrorResponse(res, FOLLOW.cannotblockyourself);
+      }
 
-      const existing = await BlockUnblock.findOne({ blocker: blocker_id, blocked: blocked_id });
+      const userToBlock = await db("users").where("id", blocked_id).first();
+      if (!userToBlock) {
+        return apiResponse.ErrorResponse(res, USER.userNotFound);
+      }
+
+      const existingBlock = await db("block_unblock")
+        .where({
+          blocker_id: blocker_id,
+          blocked_id: blocked_id,
+        })
+        .first();
 
       if (action === "block") {
-        if (existing) return apiResponse.ErrorResponse(res, `You have already blocked ${targetUser.name}`);
-
-        // Transaction to remove follows and add block
-        const session = await mongoose.startSession();
-        session.startTransaction();
-        try {
-          await FollowUnfollow.deleteMany({
-            $or: [
-              { follower: blocker_id, following: blocked_id },
-              { follower: blocked_id, following: blocker_id }
-            ]
-          }).session(session);
-
-          await BlockUnblock.create([{ blocker: blocker_id, blocked: blocked_id }], { session });
-          await session.commitTransaction();
-        } catch (err) {
-          await session.abortTransaction();
-          throw err;
-        } finally {
-          session.endSession();
+        if (existingBlock) {
+          return apiResponse.ErrorResponse(
+            res,
+            `You have already blocked ${userToBlock.name}`
+          );
         }
 
-        return apiResponse.successResponse(res, `You have blocked ${targetUser.name}`);
+        await db.transaction(async (trx) => {
+          await trx("follow_unfollow")
+            .where(function () {
+              this.where({
+                follower_id: blocker_id,
+                following_id: blocked_id,
+              }).orWhere({
+                follower_id: blocked_id,
+                following_id: blocker_id,
+              });
+            })
+            .del();
+
+          await trx("block_unblock").insert({
+            blocker_id: blocker_id,
+            blocked_id: blocked_id,
+            created_at: trx.fn.now(),
+            updated_at: trx.fn.now(),
+          });
+        });
+
+        return apiResponse.successResponse(
+          res,
+          `You have blocked ${userToBlock.name}`
+        );
       } else if (action === "unblock") {
-        if (!existing) return apiResponse.ErrorResponse(res, `You have not blocked ${targetUser.name}`);
-        await BlockUnblock.deleteOne({ _id: existing._id });
-        return apiResponse.successResponse(res, `You have unblocked ${targetUser.name}`);
+        if (!existingBlock) {
+          return apiResponse.ErrorResponse(
+            res,
+            `You have not blocked ${userToBlock.name}`
+          );
+        }
+
+        await db("block_unblock")
+          .where({
+            blocker_id: blocker_id,
+            blocked_id: blocked_id,
+          })
+          .del();
+
+        return apiResponse.successResponse(
+          res,
+          `You have unblocked ${userToBlock.name}`
+        );
       } else {
         return apiResponse.ErrorResponse(res, FOLLOW.Invalidaction);
       }
     } catch (error) {
+      console.error("Block/Unblock error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-
   async reportProfile(req, res) {
     try {
       const { reported_user_id } = req.body;
       const reporter_id = req.user.id;
 
-      if (!reported_user_id) return res.status(400).json({ success: false, message: USER.reporteduserIDrequired });
-      if (reporter_id === reported_user_id) return res.status(400).json({ success: false, message: USER.cannotreportyourself });
-
-      const user = await User.findById(reported_user_id);
-      if (!user) return res.status(404).json({ success: false, message: USER.userNotFound });
-
-      // is_reported_Arr needs to be in schema
-      // Assuming schema has array of ObjectIds
-      const reportedArr = user.is_reported_Arr || [];
-      if (reportedArr.includes(reporter_id)) {
-        return res.status(400).json({ success: false, message: USER.alreadyreportedthisuser });
+      if (!reported_user_id) {
+        return res.status(400).json({
+          success: false,
+          message: USER.reporteduserIDrequired,
+        });
       }
 
-      user.is_reported_Arr = [...reportedArr, reporter_id]; // Need to ensure schema supports this
-      // Maybe schema needs { type: [Schema.Types.ObjectId] }
-      await user.save();
+      if (reporter_id === reported_user_id) {
+        return res.status(400).json({
+          success: false,
+          message: USER.cannotreportyourself,
+        });
+      }
+
+      const reportedUser = await db("users")
+        .where("id", reported_user_id)
+        .first();
+
+      if (!reportedUser) {
+        return res.status(404).json({
+          success: false,
+          message: USER.userNotFound,
+        });
+      }
+
+      const reportedArr = reportedUser.is_reported_Arr || [];
+
+      if (reportedArr.includes(reporter_id)) {
+        return res.status(400).json({
+          success: false,
+          message: USER.alreadyreportedthisuser,
+        });
+      }
+
+      const updatedReportedArr = [...reportedArr, reporter_id];
+
+      await db("users").where("id", reported_user_id).update({
+        is_reported_Arr: updatedReportedArr,
+        updated_at: db.fn.now(),
+      });
 
       return apiResponse.successResponse(res, USER.reportProfile);
     } catch (error) {
-      console.error(error); // Silencing error in response as per original code structure? Originals didn't return anything on catch? 
-      // Original code: catch(error) { console.error... } Implicitly returns undefined (timeout)?
-      // I will return error response.
-      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+      console.error("Error in reportProfile:", error);
     }
   },
-
   async getUserProfileById(req, res) {
-    // Similar logic to getProfile but with blocking checks
     try {
       const profileUserId = req.params.id;
       const viewerUserId = req.user.id;
-      if (!profileUserId) return apiResponse.ErrorResponse(res, USER.userIDrequired);
+      if (!profileUserId) {
+        return apiResponse.ErrorResponse(res, USER.userIDrequired);
+      }
 
-      const user = await User.findById(profileUserId).select("-password -otp").lean(); // .lean() for performance and modifying obj
-      if (!user) return apiResponse.ErrorResponse(res, USER.userNotFound);
+      const user = await db("users")
+        .where("id", profileUserId)
+        .select("*")
+        .first();
 
-      // Blocking Check
-      const blockCheck = await BlockUnblock.findOne({ blocker: viewerUserId, blocked: profileUserId });
-      const isBlocked = !!blockCheck;
-      user.is_blocked = isBlocked;
+      if (!user) {
+        return apiResponse.ErrorResponse(res, USER.userNotFound);
+      }
+      user.image_url = user.image_url
+        ? `${config.baseURL}/${user.image_url}`
+        : "";
+
+      const isBlocked = await db("block_unblock")
+        .where({ blocker_id: viewerUserId, blocked_id: profileUserId })
+        .first();
 
       let isFollowing = false;
       if (!isBlocked) {
-        const followCheck = await FollowUnfollow.findOne({ follower: viewerUserId, following: profileUserId });
-        isFollowing = !!followCheck;
+        isFollowing = await db("follow_unfollow")
+          .where({ follower_id: viewerUserId, following_id: profileUserId })
+          .first();
       }
-      user.isFollowing = isFollowing;
 
-      // ... stats logic similar to getProfile ...
-      // Reusing logic for brevity:
-      // Counts
-      user.followers_count = await FollowUnfollow.countDocuments({ following: profileUserId });
-      user.following_count = await FollowUnfollow.countDocuments({ follower: profileUserId });
+      user.is_blocked = !!isBlocked;
+      user.isFollowing = !isBlocked && !!isFollowing;
 
-      // Report Check
-      user.is_Reported = (user.is_reported_Arr || []).some(id => id.toString() === viewerUserId);
+      let isReported = false;
+      const reportedArr = user.is_reported_Arr || [];
 
-      // Stats Aggregations (same as getProfile but for profileUserId)
-      const contestsWonAgg = await FantasyGame.aggregate([
-        { $match: { user: new mongoose.Types.ObjectId(profileUserId), rank: { $gt: 0 } } },
-        // ... lookup and group ...
-        {
-          $group: {
-            _id: null,
-            contests_won: { $sum: 1 },
-            total_winnings: { $sum: "$winnings" }
-          }
-        }
+      if (reportedArr.includes(viewerUserId)) {
+        isReported = true;
+      }
+
+      const [followersCount, followingCount] = await Promise.all([
+        db("follow_unfollow")
+          .where("following_id", profileUserId)
+          .count("* as count")
+          .first(),
+        db("follow_unfollow")
+          .where("follower_id", profileUserId)
+          .count("* as count")
+          .first(),
       ]);
 
-      // ... (Skipping full stats reimplementation for brevity, assuming similar structure to getProfile)
+      user.followers_count = parseInt(followersCount.count) || 0;
+      user.following_count = parseInt(followingCount.count) || 0;
+      user.is_Reported = isReported;
 
-      // Skill Score
-      const skillAgg = await FantasyTeam.aggregate([
-        { $match: { user: new mongoose.Types.ObjectId(profileUserId) } },
-        { $group: { _id: null, total: { $sum: "$total_points" } } }
+      const [followersList, followingList] = await Promise.all([
+        db("follow_unfollow")
+          .where("following_id", profileUserId)
+          .select("following_id"),
+
+        db("follow_unfollow")
+          .where("follower_id", profileUserId)
+          .select("follower_id"),
       ]);
-      user.skill_score = skillAgg[0]?.total || 0;
 
-      // Recent Matches
-      // Complex aggregation joining matches, teams, fantasy_games, etc.
-      // This is very heavy in Mongo without proper defined relationships.
-      // I'll leave a TODO or a simplified version:
-      const recentGames = await FantasyGame.find({ user: profileUserId })
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .populate({
-          path: "contest",
-          populate: {
-            path: "match",
-            populate: ["team1", "team2"]
-          }
+      user.followers_list = followersList || [];
+      user.following_list = followingList || [];
+
+      const contestsResult = await db("fantasy_games")
+        .where("user_id", profileUserId)
+        .countDistinct("contest_id as count")
+        .first();
+
+      const contestsCount = parseInt(contestsResult.count) || 0;
+
+      const matchesResult = await db("fantasy_teams")
+        .where("user_id", profileUserId)
+        .countDistinct("match_id as count")
+        .first();
+      const matchesCount = parseInt(matchesResult.count) || 0;
+
+      const seriesResult = await db("fantasy_teams as ft")
+        .join("matches as m", "ft.match_id", "m.id")
+        .where("ft.user_id", profileUserId)
+        .countDistinct("m.tournament_id as count")
+        .first();
+      const seriesCount = parseInt(seriesResult.count) || 0;
+
+      const winningsResult = await db("fantasy_games as fg")
+        .join("contests as c", "fg.contest_id", "c.id")
+        .where("fg.user_id", profileUserId)
+        .where("fg.rank", ">", 0)
+        .select(
+          db.raw("COUNT(*) as contests_won"),
+          db.raw(`
+            SUM(
+              CASE 
+                WHEN fg.rank = 1 AND c.winnings IS NOT NULL THEN 
+                  (c.winnings->>'1')::numeric 
+                WHEN fg.rank = 2 AND c.winnings IS NOT NULL THEN 
+                  (c.winnings->>'2')::numeric
+                WHEN fg.rank = 3 AND c.winnings IS NOT NULL THEN 
+                  (c.winnings->>'3')::numeric
+                ELSE 0 
+              END
+            ) as total_winnings
+          `)
+        )
+        .first();
+
+      const pointsResult = await db("fantasy_teams")
+        .where("user_id", profileUserId)
+        .sum("total_points as total_points")
+        .first();
+
+      const bestRankResult = await db("fantasy_games")
+        .where("user_id", profileUserId)
+        .whereNotNull("rank")
+        .min("rank as best_rank")
+        .first();
+
+      const winPercentage =
+        contestsCount > 0
+          ? Math.round((winningsResult.contests_won / contestsCount) * 100)
+          : 0;
+
+      const Usersallcontests = await db("fantasy_games")
+        .where("user_id", profileUserId)
+        .orderBy("updated_at", "desc")
+        .limit(2);
+
+      const skillScoreResult = await db("fantasy_teams")
+        .where("user_id", profileUserId)
+        .sum("total_points as total_points")
+        .first();
+      const skillScore = parseFloat(skillScoreResult.total_points) || 0;
+      user.skill_score = skillScore;
+
+      user.careerStats = {
+        contests: {
+          total: contestsCount,
+          won: parseInt(winningsResult.contests_won) || 0,
+          winPercentage: winPercentage,
+          totalWinnings: parseFloat(winningsResult.total_winnings) || 0,
+        },
+        matches: {
+          total: matchesCount,
+          totalPoints: parseFloat(pointsResult.total_points) || 0,
+          bestRank: parseInt(bestRankResult.best_rank) || null,
+        },
+        series: {
+          total: seriesCount,
+        },
+      };
+
+      const recentMatches = await db("fantasy_games as fg")
+        .join("contests as c", "fg.contest_id", "c.id")
+        .join("matches as m", "c.match_id", "m.id")
+        .join("teams as t1", "m.team1_id", "t1.id")
+        .join("teams as t2", "m.team2_id", "t2.id")
+        .join("fantasy_teams as ft", "fg.fantasy_team_id", "ft.id")
+        .where("fg.user_id", profileUserId)
+        .select(
+          "m.id as match_id",
+          "m.start_time as match_date",
+          "m.status as match_status",
+          "t1.name as team1_name",
+          "t1.short_name as team1_short_name",
+          "t1.logo_url as team1_logo",
+          "t2.name as team2_name",
+          "t2.short_name as team2_short_name",
+          "t2.logo_url as team2_logo",
+          "ft.name as fantasy_team_name",
+          "ft.total_points as fantasy_team_points",
+          "fg.rank as user_rank",
+          "fg.points as user_points",
+          "fg.status as entry_status",
+          db.raw("COUNT(DISTINCT fg2.id) as total_contestants"),
+          db.raw(
+            "COUNT(DISTINCT CASE WHEN fg2.rank = 1 THEN fg2.id END) as contests_won"
+          ),
+          db.raw(`
+            (
+              SELECT ft2.total_points 
+              FROM fantasy_teams ft2 
+              WHERE ft2.match_id = m.id 
+              ORDER BY ft2.total_points DESC 
+              LIMIT 1
+            ) as highest_points
+          `),
+          db.raw(`
+            (
+              SELECT CONCAT('T', ft2.id::text)
+              FROM fantasy_teams ft2 
+              WHERE ft2.match_id = m.id 
+              ORDER BY ft2.total_points DESC 
+              LIMIT 1
+            ) as highest_points_team_name
+          `),
+          db.raw(`
+            (
+              SELECT COUNT(*) 
+              FROM fantasy_teams ft3 
+              WHERE ft3.match_id = m.id 
+              AND ft3.user_id = ${profileUserId}
+            ) as teams_created
+          `),
+          db.raw(`
+            (
+              SELECT COALESCE(SUM(
+                CASE 
+                  WHEN c2.prize_pool IS NOT NULL THEN 
+                    (c2.prize_pool)::numeric 
+                  ELSE 0 
+                END
+              ), 0)
+              FROM contests c2 
+              WHERE c2.match_id = m.id
+            ) as total_prize_pool
+          `)
+        )
+        .leftJoin("fantasy_games as fg2", function () {
+          this.on("fg2.contest_id", "=", "c.id");
         })
-        .populate("fantasy_team");
+        .groupBy(
+          "m.id",
+          "m.start_time",
+          "m.status",
+          "t1.name",
+          "t1.short_name",
+          "t1.logo_url",
+          "t2.name",
+          "t2.short_name",
+          "t2.logo_url",
+          "ft.name",
+          "ft.total_points",
+          "fg.rank",
+          "fg.points",
+          "fg.status"
+        )
+        .orderBy("m.start_time", "desc")
+        .limit(10);
 
-      // Transform recentGames to expected structure
-      user.recent_matches = recentGames.map(g => {
-        const m = g.contest?.match;
-        if (!m) return null;
-        return {
-          match_id: m._id,
-          team1_name: m.team1?.name,
-          team1_logo: m.team1?.logo_url,
-          team2_name: m.team2?.name,
-          team2_logo: m.team2?.logo_url,
-          // ... other fields
-          user_rank: g.rank,
-          user_points: g.points
+      // Process match data
+      const processedMatches = recentMatches.map((match) => {
+        const matchObj = {
+          ...match,
+          total_contestants: parseInt(match.total_contestants) || 0,
+          contests_won: parseInt(match.contests_won) || 0,
+          highest_points: parseFloat(match.highest_points) || 0,
+          highest_points_team_name: match.highest_points_team_name || null,
+          teams_created: parseInt(match.teams_created) || 0,
+          total_prize_pool: parseFloat(match.total_prize_pool) || 0,
+          match_date: match.match_date
+            ? new Date(match.match_date).toISOString()
+            : null,
         };
-      }).filter(Boolean);
+        return matchObj;
+      });
+
+      user.recent_matches = processedMatches;
 
       return apiResponse.successResponseWithData(res, SUCCESS.dataFound, user);
-
     } catch (error) {
+      console.error("getUserProfile error:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-
   async scorecardList(req, res) {
     try {
-      const todayStart = moment().startOf('day').toDate();
-      const nextWeek = moment().add(7, 'days').endOf('day').toDate();
+      const now = new Date();
+      const todayStart = new Date(now);
+      todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date(now);
+      todayEnd.setDate(todayEnd.getDate() + 7);
+      todayEnd.setHours(23, 59, 59, 999);
 
-      const liveStatuses = ["Live", "1st Innings", "2nd Innings", "3rd Innings", "4th Innings"];
+      // Statuses for live and upcoming
+      const liveStatuses = [
+        "Live",
+        "1st Innings",
+        "2nd Innings",
+        "3rd Innings",
+        "4th Innings",
+      ];
       const nsStatuses = ["NS", "Not Started"];
 
-      const matches = await Match.find({
-        start_time: { $gte: todayStart, $lte: nextWeek },
-        status: { $in: [...liveStatuses, ...nsStatuses] }
-      })
-        .populate("team1", "name logo_url")
-        .populate("team2", "name logo_url")
-        .populate("tournament", "name")
-        .sort({ start_time: 1 });
+      // Query for today's matches that are either live or NS
+      const matches = await db("matches as m")
+        .whereBetween("m.start_time", [todayStart, todayEnd])
+        .where(function () {
+          this.whereIn("m.status", liveStatuses).orWhereIn(
+            "m.status",
+            nsStatuses
+          );
+        })
+        .leftJoin("teams as t1", "m.team1_id", "t1.id")
+        .leftJoin("teams as t2", "m.team2_id", "t2.id")
+        .leftJoin("tournaments as trn", "m.tournament_id", "trn.id")
+        .select(
+          "m.id as match_id",
+          "m.start_time",
+          "m.status",
+          "t1.name as team1_name",
+          "t1.logo_url as team1_logo",
+          "t2.name as team2_name",
+          "t2.logo_url as team2_logo",
+          "trn.name as tournament_name"
+        )
+        .orderBy("m.start_time", "asc");
 
-      const data = matches.map(m => ({
-        match_id: m._id,
-        start_time: m.start_time,
-        start_time_formatted: moment(m.start_time).format("ddd, D MMM h:mm A"),
-        status: m.status,
-        team1_name: m.team1?.name,
-        team1_logo: m.team1?.logo_url,
-        team2_name: m.team2?.name,
-        team2_logo: m.team2?.logo_url,
-        tournament_name: m.tournament?.name
+      // Flat array, each item includes all required fields, with formatted time
+      const data = matches.map((match) => ({
+        match_id: match.match_id,
+        start_time: match.start_time,
+        start_time_formatted: match.start_time
+          ? require("moment")(match.start_time).format("ddd, D MMM h:mm A")
+          : null,
+        status: match.status,
+        team1_name: match.team1_name,
+        team1_logo: match.team1_logo,
+        team2_name: match.team2_name,
+        team2_logo: match.team2_logo,
+        tournament_name: match.tournament_name,
       }));
 
-      return apiResponse.successResponseWithData(res, "Today's live and upcoming matches", data);
+      return apiResponse.successResponseWithData(
+        res,
+        "Today's live and upcoming matches",
+        data
+      );
     } catch (error) {
+      console.error("Error in scorecardList:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
-  }
+  },
 };
 
 module.exports = userAuthController;
