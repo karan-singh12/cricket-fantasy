@@ -18,10 +18,10 @@ exports.up = function (knex) {
         table.boolean('is_wicket').defaultTo(false);
         table.boolean('ball').defaultTo(false);
         table.boolean('out').defaultTo(false);
-        table.integer('points_t20').defaultTo(false);
-        table.integer('points_odi').defaultTo(false);
-        table.integer('points_test').defaultTo(false);
-        table.integer('points_t10').defaultTo(false);
+        table.integer('points_t20').defaultTo(0);
+        table.integer('points_odi').defaultTo(0);
+        table.integer('points_test').defaultTo(0);
+        table.integer('points_t10').defaultTo(0);
         table.integer("status").defaultTo(1)
     });
 };

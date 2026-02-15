@@ -6,7 +6,7 @@ exports.up = function (knex) {
         table.string('season');
         table.date('start_date');
         table.date('end_date');
-        table.boolean('status').defaultTo(true);
+        table.integer('status').defaultTo(1);
         table.string('category');
         table.jsonb('metadata');
         table.timestamp('created_at').defaultTo(knex.fn.now());

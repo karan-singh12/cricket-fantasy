@@ -3,7 +3,10 @@ require('dotenv').config();
 module.exports = {
     development: {
         client: 'postgresql',
-        connection: process.env.DATABASE_URL || {
+        connection: process.env.DATABASE_URL ? {
+            connectionString: process.env.DATABASE_URL,
+            ssl: { rejectUnauthorized: false }
+        } : {
             host: process.env.DB_HOST || 'localhost',
             port: process.env.DB_PORT || 5432,
             database: process.env.DB_NAME || 'fantasy_cricket_db',
@@ -24,12 +27,16 @@ module.exports = {
     },
     production: {
         client: 'postgresql',
-        connection: process.env.DATABASE_URL || {
+        connection: process.env.DATABASE_URL ? {
+            connectionString: process.env.DATABASE_URL,
+            ssl: { rejectUnauthorized: false }
+        } : {
             host: process.env.DB_HOST,
             port: process.env.DB_PORT,
             database: process.env.DB_NAME,
             user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD
+            password: process.env.DB_PASSWORD,
+            ssl: { rejectUnauthorized: false }
         },
         pool: {
             min: 2,
