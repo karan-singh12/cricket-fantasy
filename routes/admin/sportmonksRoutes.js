@@ -23,7 +23,7 @@ router.get("/getScores", auth, fxn.getScores);
 
 router.get("/scoreCalculation", auth, fxn.scoreCalculation);
 
-router.get("/getFixtureDetails", auth, fxn.getNewFixtureDetails);
+router.get("/getFixtureDetails", auth, fxn.getFixtureDetails);
 
 router.get("/players", auth, fxn.updateAllPlayers); // update players and carrer stats points
 

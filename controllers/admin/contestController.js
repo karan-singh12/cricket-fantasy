@@ -19,18 +19,18 @@ const contestController = {
         status = [],
         searchItem = "",
       } = req.body;
-  
+
       const baseQuery = db(TABLE).whereNot("contests.status", "deleted");
-  
+
       if (Array.isArray(status) && status.length > 0) {
         baseQuery.andWhere((builder) =>
           builder.whereIn("contests.status", status)
         );
       }
-  
+
       if (searchItem && searchItem.trim() !== "") {
         baseQuery.andWhere("contests.name", "ilike", `%${searchItem.trim()}%`);
-  
+
         const result = await baseQuery
           .select(
             "contests.id",
@@ -46,7 +46,7 @@ const contestController = {
             "contests.contest_type",
             "contests.winnings",
             "contests.rules",
-            "contests.created_by_user",
+            "contests.created_by",
             "contests.status",
             "contests.created_at",
             "contests.updated_at",
@@ -59,9 +59,9 @@ const contestController = {
           .leftJoin("teams as team1", "matches.team1_id", "team1.id")
           .leftJoin("teams as team2", "matches.team2_id", "team2.id")
           .orderBy("contests.created_at", "desc");
-  
+
         const totalRecords = result.length;
-  
+
         return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
           result,
           totalRecords,
@@ -69,12 +69,12 @@ const contestController = {
           pageSize: totalRecords,
         });
       }
-  
+
       const offset = Math.max(0, pageNumber - 1) * pageSize;
-  
+
       const totalResult = await baseQuery.clone().count("id as count").first();
       const totalRecords = parseInt(totalResult?.count || 0);
-  
+
       const result = await baseQuery
         .select(
           "contests.id",
@@ -90,7 +90,7 @@ const contestController = {
           "contests.contest_type",
           "contests.winnings",
           "contests.rules",
-          "contests.created_by_user",
+          "contests.created_by",
           "contests.status",
           "contests.created_at",
           "contests.updated_at",
@@ -105,7 +105,7 @@ const contestController = {
         .orderBy("contests.created_at", "desc")
         .limit(pageSize)
         .offset(offset);
-  
+
       return apiResponse.successResponseWithData(res, SUCCESS.dataFound, {
         result,
         totalRecords,

@@ -28,7 +28,7 @@ const insertTournaments = async (data, db) => {
         season: league.season ? league.season.id : null,
         start_date: null,
         end_date: null,
-        status: true,
+        status: 1,
         category: league.type || null,
         metadata: JSON.stringify(league),
         updated_at: new Date(),
@@ -85,11 +85,11 @@ const insertTeams = async (seasonData, db, tournamentId) => {
       if (!existingTeam) {
         teamData.created_at = new Date();
         await db("teams").insert(teamData);
-      
+
         result.push({ action: "inserted", team_id: team.id });
       } else {
         await db("teams").where({ team_id: team.id }).update(teamData);
-     
+
         result.push({ action: "updated", team_id: team.id });
       }
     }
@@ -132,8 +132,8 @@ const insertFixtures = async (seasonData, db, tournamentId) => {
         team2_id: visitorTeam.id,
         victory_team_id: fixture.winner_team_id
           ? (await db("teams").where("team_id", fixture.winner_team_id).first())
-            ?.id || 0
-          : 0,
+            ?.id || null
+          : null,
         venue: fixture.venue_id ? String(fixture.venue_id) : null,
         match_number: fixture.round,
         match_type: fixture.type,

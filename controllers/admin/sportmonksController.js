@@ -370,11 +370,6 @@ const SportMonksController = {
     }
   },
 
-  // to sync all tournaments data from tournamentId to teams , players
-  // every day
-
-  // to get update all player points and credits
-  // every day after syncAllTournamentData
   async updateAllPlayers(req, res) {
     try {
       const allPlayers = await db("players")
@@ -522,281 +517,6 @@ const SportMonksController = {
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-  // async getFixtureDetails(req, res) {
-  //   try {
-  //     const todayStart = new Date();
-  //     todayStart.setHours(0, 0, 0, 0);
-
-  //     const todayEnd = new Date();
-  //     todayEnd.setHours(23, 59, 59, 999);
-
-  //     // Only get today's matches to minimize API calls
-  //     const matches = await db("matches")
-  //       .where("start_time", ">=", todayStart)
-  //       .where("start_time", "<=", todayEnd)
-  //       // .whereIn("status", [
-  //       //   "NS",
-  //       //   "Not Started",
-  //       //   "Delayed",
-  //       //   "Live",
-  //       //   "1st Innings",
-  //       //   "2nd Innings",
-  //       //   "3rd Innings",
-  //       //   "4th Innings",
-  //       //   "Finished",
-  //       //   "Completed",
-  //       //   "Stumps",
-  //       // ])
-  //       .whereNotIn("status", ["Finished", "Completed","Aban.","Delayed"])
-  //       .select("id", "sm_match_id", "status", "start_time");
-
-  //     console.log(`Found ${matches.length} today's matches to update`);
-
-  //     let processed = 0;
-  //     let skipped = 0;
-  //     let scoreboardsUpdated = 0;
-  //     const BASE_DELAY = 1500;
-
-  //     for (const match of matches) {
-  //       try {
-  //         const matchId = match.sm_match_id;
-  //         let response;
-  //         let scoreboardResponse;
-
-  //         if (
-  //           ["Live", "1st Innings", "2nd Innings", "3rd Innings"].includes(
-  //             match.status
-  //           )
-  //         ) {
-  //           response = await sportmonksService.getFixtureDetails(matchId);
-  //         } else {
-  //           // For non-live matches (NS, Not Started, Delayed), just get basic info
-  //           response = await sportmonksService.getFixtureScoreboards(matchId);
-  //         }
-
-  //         // Only fetch scoreboards for live matches to reduce API calls
-  //         if (
-  //           ["Live", "1st Innings", "2nd Innings", "3rd Innings"].includes(
-  //             match.status
-  //           )
-  //         ) {
-  //           try {
-  //             scoreboardResponse =
-  //               await sportmonksService.getFixtureScoreboards(matchId);
-  //             if (scoreboardResponse && scoreboardResponse.data) {
-  //               await tournamentDbService.insertMatchStats(
-  //                 scoreboardResponse.data,
-  //                 db
-  //               );
-  //               scoreboardsUpdated++;
-  //               console.log(`Scoreboard updated for live match ${match.id}`);
-  //             }
-  //           } catch (scoreboardErr) {
-  //             console.warn(
-  //               `Failed to fetch scoreboard for live match ${match.id}:`,
-  //               scoreboardErr.message
-  //             );
-  //           }
-  //         }
-
-  //         if (!response || !response.data) {
-  //           console.warn(
-  //             `[getFixtureDetails] Empty response for match ${match.id} (sm ${matchId}); skipping`
-  //           );
-  //           skipped++;
-  //           await new Promise((r) => setTimeout(r, BASE_DELAY));
-  //           continue;
-  //         }
-
-  //         const updatePayload = {
-  //           status: response.data.status || match.status,
-  //           updated_at: new Date(),
-  //         };
-
-  //         // if ((response.data.status || "").toLowerCase() === "finished") {
-  //         //   updatePayload.end_time = new Date();
-  //         // }
-
-  //         await db("matches").where({ id: match.id }).update(updatePayload);
-
-  //         const result = await tournamentDbService.insertMatchStats(
-  //           response.data,
-  //           db
-  //         );
-
-  //         processed++;
-  //         await new Promise((r) => setTimeout(r, BASE_DELAY));
-  //       } catch (err) {
-  //         console.error(`Error processing match ${match.id}:`, err);
-  //         skipped++;
-  //       }
-  //     }
-
-  //     return apiResponse.successResponseWithData(
-  //       res,
-  //       "Today's matches updated successfully",
-  //       { processed, skipped, scoreboardsUpdated }
-  //     );
-  //   } catch (error) {
-  //     console.error("Error in getFixtureDetails:", error);
-  //     return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-  //   }
-  // },
-
-  // async getFixtureDetails(req, res) {
-  //   try {
-  //     const todayStart = new Date();
-  //     todayStart.setHours(0, 0, 0, 0);
-
-  //     const todayEnd = new Date();
-  //     todayEnd.setHours(23, 59, 59, 999);
-
-  //     // Only get today's matches to minimize API calls
-  //     const matches = await db("matches")
-  //       .where("start_time", ">=", todayStart)
-  //       .where("start_time", "<=", todayEnd)
-  //       .whereNotIn("status", ["Finished", "Completed", "Aban.", "Delayed"])
-  //       .select("id", "sm_match_id", "status", "start_time","metadata");
-
-  //     const now = new Date();
-  //     // Filter matches: For NS, only if less than 5 min left to start
-  //     const filteredMatches = matches.filter((match) => {
-  //       if (["NS", "Not Started"].includes(match.status)) {
-  //         return true; // include all not started matches
-  //       }
-  //       if (
-  //         [
-  //           "NS",
-  //           "1st Innings",
-  //           "2nd Innings",
-  //           "3rd Innings",
-  //           "4th Innings",
-  //         ].includes(match.status)
-  //       ) {
-  //         return true; // always include live matches
-  //       }
-  //       return false; // skip other statuses
-  //     });
-
-  //     console.log(
-  //       `Filtered to ${filteredMatches.length} matches to update (from ${matches.length})`
-  //     );
-
-  //     let processed = 0;
-  //     let skipped = 0;
-  //     let scoreboardsUpdated = 0;
-  //     const BASE_DELAY = 1500;
-
-  //     for (const match of filteredMatches) {
-  //       try {
-  //         const matchId = match.sm_match_id;
-  //         let response;
-  //         let scoreboardResponse;
-
-  //         if (
-  //           [
-  //             "Live",
-  //             "1st Innings",
-  //             "2nd Innings",
-  //             "3rd Innings",
-  //             "4th Innings",
-  //           ].includes(match.status)
-  //         ) {
-  //           response = await sportmonksService.getFixtureDetails(matchId);
-  //         } else {
-  //           // For non-live matches (NS, Not Started, Delayed), just get basic info
-  //           response = await sportmonksService.getFixtureScoreboards(matchId);
-  //         }
-
-  //         // Only fetch scoreboards for live matches to reduce API calls
-  //         if (
-  //           [
-  //             "Live",
-  //             "1st Innings",
-  //             "2nd Innings",
-  //             "3rd Innings",
-  //             "4th Innings",
-  //           ].includes(match.status)
-  //         ) {
-  //           try {
-  //             scoreboardResponse =
-  //               await sportmonksService.getFixtureScoreboards(matchId);
-  //             if (scoreboardResponse && scoreboardResponse.data) {
-  //               await tournamentDbService.insertMatchStats(
-  //                 scoreboardResponse.data,
-  //                 db
-  //               );
-  //               scoreboardsUpdated++;
-  //               console.log(`Scoreboard updated for live match ${match.id}`);
-  //             }
-  //           } catch (scoreboardErr) {
-  //             console.warn(
-  //               `Failed to fetch scoreboard for live match ${match.id}:`,
-  //               scoreboardErr.message
-  //             );
-  //           }
-  //         }
-  //         console.log(
-  //           ` Match id ${match.id} (sm: ${matchId}): DB me status=${match.status}, API se status=${response.data.status}`
-  //         );
-
-  //         if (!response || !response.data) {
-  //           console.warn(
-  //             `[getFixtureDetails] Empty response for match ${match.id} (sm ${matchId}); skipping`
-  //           );
-  //           skipped++;
-  //           await new Promise((r) => setTimeout(r, BASE_DELAY));
-  //           continue;
-  //         }
-  //         const apiData = response.data;
-  //         const currentMetadata = match.metadata || {};
-  //       const updatedMetadata = {
-  //         ...currentMetadata,
-  //         toss_won_team_id: apiData.toss_won_team_id || currentMetadata.toss_won_team_id,
-  //         elected: apiData.elected || currentMetadata.elected,
-  //         localteam_id: apiData.localteam_id || currentMetadata.localteam_id,
-  //         visitorteam_id: apiData.visitorteam_id || currentMetadata.visitorteam_id,
-  //         status: apiData.status || currentMetadata.status,
-  //         note: apiData.note || currentMetadata.note,
-  //         // Add other fields you want to preserve from metadata
-  //         ...currentMetadata
-  //       };
-
-  //         const updatePayload = {
-  //           status: response.data.status || match.status,
-  //           updated_at: new Date(),
-  //           metadata: updatedMetadata // Update the metadata field
-  //         };
-
-  //         if (scoreboardResponse && scoreboardResponse.data) {
-  //           updatePayload.scorecard = scoreboardResponse.data;
-  //         }
-
-  //         console.log("Updating match:", match.id, "with status:", updatePayload.status);
-
-  //         await db("matches").where({ id: match.id }).update(updatePayload);
-
-  //         // Also update the main match stats
-  //         const result = await tournamentDbService.insertMatchStats(apiData, db);
-
-  //         processed++;
-  //         await new Promise((r) => setTimeout(r, BASE_DELAY));
-  //       } catch (err) {
-  //         console.error(`Error processing match ${match.id}:`, err);
-  //         skipped++;
-  //       }
-  //     }
-
-  //     return apiResponse.successResponseWithData(
-  //       res,
-  //       "Today's matches updated successfully",
-  //       { processed, skipped, scoreboardsUpdated }
-  //     );
-  //   } catch (error) {
-  //     console.error("Error in getFixtureDetails:", error);
-  //     return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
-  //   }
-  // },
 
   async getFixtureDetails(req, res) {
     try {
@@ -1046,7 +766,7 @@ const SportMonksController = {
       const todayEndIST = new Date(nowIST);
       todayEndIST.setHours(23, 59, 59, 999);
 
-   
+
 
       const todayStart = new Date(
         todayStartIST.getTime() - 5.5 * 60 * 60 * 1000
@@ -1070,7 +790,7 @@ const SportMonksController = {
           "Stump Day 2",
           "Stump Day 3",
           "Stump Day 4",
-         
+
           "Tea Break",
           "Lunch",
           "Dinner",
@@ -1089,10 +809,10 @@ const SportMonksController = {
 
       //  recently finished matches past 3 din se aaj end hue vo 
       const recentlyFinished = await db("matches")
-  .where("start_time", ">=", new Date(todayStart.getTime() - 3 * 24 * 60 * 60 * 1000)) 
-  .where("start_time", "<=", todayEnd)
-  .whereIn("status", ["Finished", "Completed", "Stumps"])
-  .select("id", "sm_match_id", "status");
+        .where("start_time", ">=", new Date(todayStart.getTime() - 3 * 24 * 60 * 60 * 1000))
+        .where("start_time", "<=", todayEnd)
+        .whereIn("status", ["Finished", "Completed", "Stumps"])
+        .select("id", "sm_match_id", "status");
 
       console.log(
         `Found ${liveMatches.length} live matches, ${upcomingMatches.length} upcoming matches, and ${recentlyFinished.length} finished matches (TODAY ONLY)`
@@ -1222,7 +942,7 @@ const SportMonksController = {
           console.log("Processing finished match:", match.id);
           let fixtureDetails = null;
           let scoreboardData = null;
-  
+
           try {
             const response = await sportmonksService.getFixtureDetails(
               match.sm_match_id
@@ -1231,7 +951,7 @@ const SportMonksController = {
           } catch (err) {
             console.warn(`Fixture fetch failed [finished ${match.id}]:`, err.message);
           }
-  
+
           try {
             const scoreboardResp = await sportmonksService.getFixtureScoreboards(
               match.sm_match_id
@@ -1247,30 +967,30 @@ const SportMonksController = {
               err.message
             );
           }
-  
+
           if (fixtureDetails || scoreboardData) {
             const updatePayload = {
               updated_at: new Date(),
               status: fixtureDetails?.status || match.status,
             };
-  
+
             if (
               !match.end_time &&
               (fixtureDetails?.status || "").toLowerCase() === "finished"
             ) {
               updatePayload.end_time = new Date();
             }
-  
+
             await db("matches").where({ id: match.id }).update(updatePayload);
           }
-  
+
           if (fixtureDetails) {
             await tournamentDbService.insertMatchStats(fixtureDetails, db);
           }
           if (scoreboardData) {
             await tournamentDbService.insertMatchStats(scoreboardData, db);
           }
-  
+
           processed++;
           processedIds.push(match.sm_match_id);
           await new Promise((r) => setTimeout(r, DELAY));
@@ -1283,16 +1003,16 @@ const SportMonksController = {
       return apiResponse.successResponseWithData(
         res,
         "Today's match scoreboards updated",
-          {
-        live_matches: liveMatches.length,
-        upcoming_matches: upcomingMatches.length,
-        finished_matches: recentlyFinished.length,
-        processed,
-        errors,
-        scoreboards_updated: scoreboardsUpdated,
-        processed_match_ids: processedIds,
-        scoreboard_updated_ids: scoreboardUpdatedIds,
-      }
+        {
+          live_matches: liveMatches.length,
+          upcoming_matches: upcomingMatches.length,
+          finished_matches: recentlyFinished.length,
+          processed,
+          errors,
+          scoreboards_updated: scoreboardsUpdated,
+          processed_match_ids: processedIds,
+          scoreboard_updated_ids: scoreboardUpdatedIds,
+        }
       );
     } catch (error) {
       console.error("Error in updateLiveScoreboards:", error);
@@ -2088,12 +1808,12 @@ const SportMonksController = {
           const resp = await this.syncMatchLineup(
             { params: { matchId: m.id } },
             {
-              status: () => ({ json: () => {} }),
-              json: () => {},
+              status: () => ({ json: () => { } }),
+              json: () => { },
             }
           );
           updated++;
-        } catch (_e) {}
+        } catch (_e) { }
       }
 
       return apiResponse.successResponseWithData(
@@ -2136,12 +1856,12 @@ const SportMonksController = {
           await this.syncMatchLineup(
             { params: { matchId: m.id } },
             {
-              status: () => ({ json: () => {} }),
-              json: () => {},
+              status: () => ({ json: () => { } }),
+              json: () => { },
             }
           );
           attempted++;
-        } catch (_e) {}
+        } catch (_e) { }
       }
 
       return apiResponse.successResponseWithData(
@@ -2285,77 +2005,77 @@ const SportMonksController = {
   async completeContestManually(req, res) {
     try {
       const { contestId } = req.params;
-  
+
       if (!contestId) {
         return apiResponse.ErrorResponse(res, "Contest ID is required");
       }
-  
+
       const contest = await db("contests").where({ id: contestId }).first();
       if (!contest) {
         return apiResponse.ErrorResponse(res, "Contest not found");
       }
-  
+
       // Match info
       const match = await db("matches").where({ id: contest.match_id }).first();
       if (!match) {
         return apiResponse.ErrorResponse(res, "Match not found for this contest");
       }
-  
+
       // Leaderboard
       const leaderboard = await db("leaderboard")
         .where({ contestId: contest.id })
         .orderBy("rank", "asc");
-  
+
       if (!leaderboard.length) {
         return apiResponse.successResponse(res, "No leaderboard found for contest");
       }
-  
+
       // Already distributed check
       const existingTxns = await db("transactions")
         .where({ contest_id: contest.id, transactionType: "contest_winning" });
-  
+
       if (existingTxns.length) {
         // Reverse old winnings
         for (const txn of existingTxns) {
           await db("wallet")
             .where({ user_id: txn.user_id })
             .decrement("balance", txn.amount);
-  
+
           await db("users")
             .where({ id: txn.user_id })
             .decrement("wallet_balance", txn.amount);
         }
-  
+
         // Remove old txns
         await db("transactions")
           .where({ contest_id: contest.id, transactionType: "contest_winning" })
           .del();
       }
-  
+
       const winnings = contest.winnings || [];
       const team1 = await db("teams").where("id", match.team1_id).first();
       const team2 = await db("teams").where("id", match.team2_id).first();
-  
+
       const matchTitle = team1 && team2 ? `${team1.short_name} vs ${team2.short_name}` : "Unknown Match";
-  
+
       let totalDistributed = 0;
       let winnersCount = 0;
-  
+
       for (const payoutTier of winnings) {
         const { from, to, price } = payoutTier;
-  
+
         const winners = leaderboard.filter((row) => row.rank >= from && row.rank <= to);
-  
+
         for (const winner of winners) {
           if (price > 0) {
             await db("wallet")
               .where({ user_id: winner.userId })
               .increment("balance", price);
-  
+
             await db("users")
               .where({ id: winner.userId })
               .increment("wallet_balance", price);
-  
+
             await db("transactions").insert({
               user_id: winner.userId,
               title: matchTitle,
@@ -2368,13 +2088,13 @@ const SportMonksController = {
               created_at: new Date(),
               updated_at: new Date(),
             });
-  
+
             totalDistributed += price;
             winnersCount++;
           }
         }
       }
-  
+
       return apiResponse.successResponseWithData(
         res,
         `Contest ${contest.id} corrected successfully`,
@@ -2385,7 +2105,7 @@ const SportMonksController = {
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   }
-  
+
 };
 
 module.exports = SportMonksController;

@@ -6,15 +6,15 @@ const { ERROR, SUCCESS, TOURNAMENT } = require("../../utils/responseMsg");
 const tournamentController = {
   // Get all tournaments
   async getAllTournaments(req, res) {
-   
+
     try {
       const today = moment().startOf("day").toDate();
       const oneMonthLater = moment().add(1, "months").endOf("day").toDate();
       // const next7Days = moment().add(7, "days").endOf("day").toDate();
 
-      const tournaments = await knex("tournaments as t")
+      let tournaments = await knex("tournaments as t")
         .select("t.*")
-        .where("t.status", true)
+        .where("t.status", 1)
         .whereExists(function () {
           this.select("*")
             .from("matches as m")
@@ -23,25 +23,32 @@ const tournamentController = {
             .whereRaw("m.tournament_id = t.id")
             .whereBetween("m.start_time", [today, oneMonthLater])
             .where("m.status", "NS")
-          .whereNotNull("t1.id")
-          .whereNotNull("t2.id")
-          .whereExists(function () {
-            this.select("*")
-              .from("player_teams")
-              .whereRaw("player_teams.team_id = m.team1_id")
-              .whereRaw("player_teams.season_id::text = t.season");
-          })
-          .whereExists(function () {
-            this.select("*")
-              .from("player_teams")
-              .whereRaw("player_teams.team_id = m.team2_id")
-              .whereRaw("player_teams.season_id::text = t.season");
-          })
-          
+            .whereNotNull("t1.id")
+            .whereNotNull("t2.id")
+            .whereExists(function () {
+              this.select("*")
+                .from("player_teams")
+                .whereRaw("player_teams.team_id = m.team1_id")
+                .whereRaw("player_teams.season_id::text = t.season");
+            })
+            .whereExists(function () {
+              this.select("*")
+                .from("player_teams")
+                .whereRaw("player_teams.team_id = m.team2_id")
+                .whereRaw("player_teams.season_id::text = t.season");
+            });
         })
         .orderBy("t.name", "asc");
 
-    
+      // Fallback: If no tournaments with upcoming matches and squad are found, 
+      // return all active tournaments as "simple tournaments"
+      if (!tournaments.length) {
+        tournaments = await knex("tournaments")
+          .where("status", 1)
+          .orderBy("name", "asc");
+      }
+
+
 
 
       const { getLanguage } = require("../../utils/responseMsg");
@@ -52,7 +59,7 @@ const tournamentController = {
           ? "hi"
           : getLanguage().toLowerCase();
 
-    
+
       const translatedTournaments = await Promise.all(
         tournaments.map(async (t) => {
           const translatedName = await translateTo(t.name, lang);
@@ -93,7 +100,7 @@ const tournamentController = {
     try {
       const tournament = await knex("tournaments")
         .where("id", req.params.id)
-        .where("status", true)
+        .where("status", 1)
         .first();
 
       if (!tournament) {
@@ -126,7 +133,7 @@ const tournamentController = {
         // .leftJoin('venues', 'matches.venue_id', 'venues.id')
         .where("matches.tournament_id", req.params.id)
         .orderBy("matches.start_time", "asc")
-        .whereNot("matches.status", "Finished" )
+        .whereNot("matches.status", "Finished")
         .whereNot("matches.status", "Aban.")
 
       return apiResponse.successResponseWithData(
