@@ -21,7 +21,12 @@ const testConnection = async () => {
         console.error('\x1b[31m%s\x1b[0m', '✗ Database connection failed');
         console.error('\x1b[31m%s\x1b[0m', `  ├── Error: ${error.message}`);
         console.error('\x1b[31m%s\x1b[0m', '  └── Check your database configuration and make sure PostgreSQL is running');
-        process.exit(1);
+
+        if (process.env.NODE_ENV !== 'development') {
+            process.exit(1);
+        } else {
+            console.warn('\x1b[33m%s\x1b[0m', '  [!] Continuing in DEVELOPMENT mode despite connection failure.');
+        }
     }
 };
 
