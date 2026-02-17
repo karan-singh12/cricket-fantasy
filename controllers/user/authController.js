@@ -202,10 +202,8 @@ const userAuthController = {
 
       email = email?.trim().toLowerCase();
       const isEmailLogin = !!email;
-      const otp = isEmailLogin ? generateOtp() : generateOtp();
-      const condition = isEmailLogin
-        ? db.raw("LOWER(email) = ?", [email])
-        : { phone };
+      const otp = "1234"; // Static OTP for testing
+      const condition = isEmailLogin ? db.raw("LOWER(email) = ?", [email]) : { phone };
 
       let user = await db("users")
         .where(condition)
@@ -264,24 +262,24 @@ const userAuthController = {
         updated_at: db.fn.now(),
       });
 
-      if (isEmailLogin) {
-        const template = await db("emailtemplates")
-          .where({ slug: "Send-OTP", status: 1 })
-          .select("subject", "content")
-          .first();
+      // if (isEmailLogin) {
+      //   const template = await db("emailtemplates")
+      //     .where({ slug: "Send-OTP", status: 1 })
+      //     .select("subject", "content")
+      //     .first();
 
-        const subject = template?.subject || "Your One-Time Password (OTP)";
-        const html = template
-          ? require("../../utils/functions").replaceTemplateVars(
-              template.content,
-              { email, otp }
-            )
-          : `<p>Your One-Time Password (OTP) is: <strong>${otp}</strong></p>`;
+      //   const subject = template?.subject || "Your One-Time Password (OTP)";
+      //   const html = template
+      //     ? require("../../utils/functions").replaceTemplateVars(
+      //         template.content,
+      //         { email, otp }
+      //       )
+      //     : `<p>Your One-Time Password (OTP) is: <strong>${otp}</strong></p>`;
 
-        await sendOtpToUser({ email, otp, subject, html });
-      } else {
-        await sendOtpToUser({ phone, otp });
-      }
+      //   await sendOtpToUser({ email, otp, subject, html });
+      // } else {
+      //   await sendOtpToUser({ phone, otp });
+      // }
 
       return apiResponse.successResponseWithData(
         res,
@@ -530,8 +528,7 @@ const userAuthController = {
           await sendPushNotificationFCM(
             referrer.ftoken,
             "Referral Bonus",
-            `Your referral code was used by ${
-              data.email || data.phone
+            `Your referral code was used by ${data.email || data.phone
             }. You've earned a bonus!`
           );
         } catch (pushError) {
@@ -781,12 +778,12 @@ const userAuthController = {
         const subject = template?.subject || "Your One-Time Password (OTP)";
         const html = template
           ? require("../../utils/functions").replaceTemplateVars(
-              template.content,
-              {
-                email: normalizedEmail,
-                otp: newOtp,
-              }
-            )
+            template.content,
+            {
+              email: normalizedEmail,
+              otp: newOtp,
+            }
+          )
           : `<p>Your One-Time Password (OTP) is: <strong>${newOtp}</strong></p>`;
 
         await sendOtpToUser({
@@ -844,12 +841,12 @@ const userAuthController = {
         const subject = template?.subject || "Your One-Time Password (OTP)";
         const html = template
           ? require("../../utils/functions").replaceTemplateVars(
-              template.content,
-              {
-                email: normalizedEmail,
-                otp: newOtp,
-              }
-            )
+            template.content,
+            {
+              email: normalizedEmail,
+              otp: newOtp,
+            }
+          )
           : `<p>Your One-Time Password (OTP) is: <strong>${newOtp}</strong></p>`;
 
         await sendOtpToUser({
@@ -1104,16 +1101,14 @@ const userAuthController = {
           email && phone
             ? "Email and Phone Update Verification"
             : email
-            ? "Email Update Verification"
-            : "Phone Update Verification";
-        notificationContent = `Please verify your ${
-          email && phone ? "email and phone" : email ? "email" : "phone"
-        } with the OTP sent.`;
+              ? "Email Update Verification"
+              : "Phone Update Verification";
+        notificationContent = `Please verify your ${email && phone ? "email and phone" : email ? "email" : "phone"
+          } with the OTP sent.`;
       } else if (updatedFields.length === 1) {
         const field = updatedFields[0];
-        notificationTitle = `${
-          field.charAt(0).toUpperCase() + field.slice(1)
-        } Updated`;
+        notificationTitle = `${field.charAt(0).toUpperCase() + field.slice(1)
+          } Updated`;
         notificationContent = `Your ${field} has been successfully updated.`;
       } else if (updatedFields.length > 1) {
         const lastField = updatedFields.pop();
@@ -1218,12 +1213,12 @@ const userAuthController = {
         const subject = template?.subject || "Your One-Time Password (OTP)";
         const html = template
           ? require("../../utils/functions").replaceTemplateVars(
-              template.content,
-              {
-                email: normalizedEmail,
-                otp,
-              }
-            )
+            template.content,
+            {
+              email: normalizedEmail,
+              otp,
+            }
+          )
           : `<p>Your One-Time Password (OTP) is: <strong>${otp}</strong></p>`;
 
         await sendOtpToUser({ email: normalizedEmail, otp, subject, html });
@@ -1238,8 +1233,8 @@ const userAuthController = {
         isEmailUpdate && isPhoneUpdate
           ? "OTP sent for email and phone update verification"
           : isEmailUpdate
-          ? "OTP sent for email update verification"
-          : "OTP sent for phone update verification",
+            ? "OTP sent for email update verification"
+            : "OTP sent for phone update verification",
         { otp }
       );
     } catch (error) {
@@ -1541,26 +1536,26 @@ const userAuthController = {
     try {
       const { pageSize = 10, pageNumber = 1, readStatus = null } = req.body;
       const offset = (pageNumber - 1) * pageSize;
-  
+
       // base query
       const baseQuery = db("notifications").where("user_id", req.user.id);
-  
+
       if (readStatus !== null) {
         baseQuery.andWhere("is_read", readStatus);
       }
-  
+
       baseQuery.andWhere(function () {
         this.where(function () {
           this.whereNull("status").andWhere("sent_at", "<=", db.fn.now());
         }).orWhere(function () {
-          this.where("status", true).andWhere("sent_at", "<=", db.fn.now());
+          this.where("status", 1).andWhere("sent_at", "<=", db.fn.now());
         });
       });
-  
+
       // total records count
       const totalResult = await baseQuery.clone().count("* as total").first();
       const totalRecords = totalResult ? parseInt(totalResult.total) : 0;
-  
+
       // fetch paginated notifications
       const notifications = await baseQuery
         .clone()
@@ -1568,26 +1563,26 @@ const userAuthController = {
         .orderByRaw("COALESCE(sent_at, created_at) DESC")
         .limit(pageSize)
         .offset(offset);
-  
+
       const today = moment().startOf("day");
       const yesterday = moment().subtract(1, "days").startOf("day");
-  
+
       const grouped = {
         Today: [],
         Yesterday: [],
         Older: [],
       };
-  
+
       const translatedNotifications = await Promise.all(
         notifications.map(async (notification) => {
           const displayTime = notification.sent_at || notification.created_at;
           const createdAt = moment(displayTime);
-  
+
           const now = moment();
           const diffMinutes = now.diff(createdAt, "minutes");
           const diffHours = now.diff(createdAt, "hours");
           const diffDays = now.diff(createdAt, "days");
-  
+
           let timeAgo;
           if (diffMinutes < 60) {
             timeAgo = `${diffMinutes} min ago`;
@@ -1596,9 +1591,9 @@ const userAuthController = {
           } else {
             timeAgo = `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
           }
-  
+
           const translated = await translateNotificationData(notification);
-  
+
           const notifData = {
             id: notification.id.toString(),
             title: translated.title,
@@ -1606,7 +1601,7 @@ const userAuthController = {
             content: translated.content,
             is_read: notification.is_read,
           };
-  
+
           if (createdAt.isSame(today, "day")) {
             grouped.Today.push(notifData);
           } else if (createdAt.isSame(yesterday, "day")) {
@@ -1614,11 +1609,11 @@ const userAuthController = {
           } else {
             grouped.Older.push(notifData);
           }
-  
+
           return notifData;
         })
       );
-  
+
       const result = [];
       if (grouped.Today.length)
         result.push({ title: "Today", data: grouped.Today });
@@ -1626,7 +1621,7 @@ const userAuthController = {
         result.push({ title: "Yesterday", data: grouped.Yesterday });
       if (grouped.Older.length)
         result.push({ title: "Older", data: grouped.Older });
-  
+
       return apiResponse.successResponseWithData(
         res,
         NOTIFICATION.notificationfetched,
@@ -1637,7 +1632,7 @@ const userAuthController = {
       return apiResponse.ErrorResponse(res, ERROR.NoDataFound);
     }
   },
-  
+
 
   async readNotification(req, res) {
     try {
