@@ -16,6 +16,7 @@ const SportMonksController = {
   async getLeagues(req, res) {
     try {
       const include = "season";
+      console.log('yaha aya h')
       const response = await sportmonksService.getLeagues(include);
       if (!response?.data?.length) {
         return apiResponse.successResponseWithData(

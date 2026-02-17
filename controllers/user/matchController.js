@@ -12,15 +12,15 @@ const matchController = {
     try {
       const { tournament_id } = req.params;
       const seasonRow = await knex("tournaments")
-      .select("season")
-      .where("id", tournament_id)
-      .first();
+        .select("season")
+        .where("id", tournament_id)
+        .first();
 
-    if (!seasonRow) {
-      return apiResponse.ErrorResponse(res, "Tournament not found");
-    }
+      if (!seasonRow) {
+        return apiResponse.ErrorResponse(res, "Tournament not found");
+      }
 
-    const seasonId = seasonRow.season;
+      const seasonId = seasonRow.season;
       console.log(tournament_id)
       let query = knex("matches")
         .select(
@@ -42,7 +42,7 @@ const matchController = {
           "t2.short_name as team2_shortName",
           knex.raw("COUNT(contests.id) as contest_count"),
           knex.raw("COALESCE(SUM(CAST(contests.prize_pool::text AS NUMERIC)), 0) as prize_pool")
-    
+
         )
         .where("matches.tournament_id", Number(tournament_id))
         .where("matches.status", "NS")
@@ -54,21 +54,6 @@ const matchController = {
         .leftJoin("teams as t2", "matches.team2_id", "t2.id")
         .leftJoin("tournaments", "matches.tournament_id", "tournaments.id")
         .leftJoin("contests", "matches.id", "contests.match_id")
-         // ✅ Only include matches where BOTH teams have players mapped for this season
-      .whereExists(function () {
-        this.select("*")
-          .from("player_teams")
-          .whereRaw("player_teams.team_id = matches.team1_id")
-          .andWhere("player_teams.season_id", seasonId);
-      })
-      .whereExists(function () {
-        this.select("*")
-          .from("player_teams")
-          .whereRaw("player_teams.team_id = matches.team2_id")
-          .andWhere("player_teams.season_id", seasonId);
-      })
-        
-       
         .groupBy(
           "matches.id",
           "tournaments.id",
@@ -201,7 +186,7 @@ const matchController = {
   //       .leftJoin("tournaments", "matches.tournament_id", "tournaments.id")
   //       .leftJoin("contests", "matches.id", "contests.match_id")
   //       whereBetween("matches.start_time", [today, oneMonthLater])
-        
+
 
   //       .groupBy(
   //         "matches.id",
@@ -438,21 +423,22 @@ const matchController = {
       const { tournament_id, category } = req.params;
       const userid = req.user?.id;
       const seasonRow = await knex("tournaments")
-      .select("season")
-      .where("id", tournament_id)
-      .first();
+        .select("season")
+        .where("id", tournament_id)
+        .first();
 
-    if (!seasonRow) {
-      return apiResponse.ErrorResponse(res, "Tournament not found");
-    }
-    const seasonId = seasonRow.season;
-  
+      console.log(seasonRow);
+
+      if (!seasonRow) {
+        return apiResponse.ErrorResponse(res, "Tournament not found");
+      }
+      const seasonId = seasonRow.season;
+      console.log(seasonId);
+
       // Time windows
-      const today = moment().startOf("day").toDate();
-      const oneMonthLater = moment().add(1, "months").endOf("day").toDate();
       const next24Hours = moment().add(24, "hours").toDate();
       const now = moment().toDate();
-  
+
       const UPCOMING = [
         "NS",
         "Delayed",
@@ -470,9 +456,9 @@ const matchController = {
         "Stump Day 1", "Stump Day 2", "Stump Day 3", "Stump Day 4",
         "Innings Break", "Tea Break", "Lunch", "Dinner", "Live"
       ];
-      const EXCLUDE = ["Finished", "Completed","Cancl.","Cancl"];
+      const EXCLUDE = ["Finished", "Completed", "Cancl.", "Cancl"];
 
-  
+
       // Base query (1 month window)
       let query = knex("matches")
         .select(
@@ -480,7 +466,7 @@ const matchController = {
           "matches.sm_match_id as sm_match_id",
           "matches.id as match_id",
           "tournaments.id as tournament_id",
-  
+
           "t1.id as team1_id",
           "t1.logo_url as team1_logo_url",
           "t2.id as team2_id",
@@ -489,13 +475,13 @@ const matchController = {
           "t1.short_name as team1_shortName",
           "t2.name as team2_name",
           "t2.short_name as team2_shortName",
-  
+
           "matches.match_number",
           "matches.match_type",
           "matches.start_time",
           "matches.status",
           "tournaments.name as tournament_name",
-  
+
           knex.raw(
             "COALESCE(SUM(CAST(contests.prize_pool::text AS NUMERIC)), 0) as total_prize_pool"
           ),
@@ -510,19 +496,6 @@ const matchController = {
         .leftJoin("teams as t2", "matches.team2_id", "t2.id")
         .leftJoin("tournaments", "matches.tournament_id", "tournaments.id")
         .leftJoin("contests", "matches.id", "contests.match_id")
-        .whereBetween("matches.start_time", [today, oneMonthLater])
-        .whereExists(function () {
-          this.select("*")
-            .from("player_teams")
-            .whereRaw("player_teams.team_id = matches.team1_id")
-            .andWhere("player_teams.season_id", seasonId);
-        })
-        .whereExists(function () {
-          this.select("*")
-            .from("player_teams")
-            .whereRaw("player_teams.team_id = matches.team2_id")
-            .andWhere("player_teams.season_id", seasonId);
-        })
         .groupBy(
           "matches.id",
           "matches.match_number",
@@ -538,7 +511,7 @@ const matchController = {
           "tournaments.name",
           "tournaments.id"
         );
-  
+
       // Category filters
       switch (category) {
         case "recommended":
@@ -554,7 +527,7 @@ const matchController = {
             .orderBy("total_prize_pool", "desc")
             .orderBy("matches.start_time", "asc");
           break;
-  
+
         case "startingSoon":
           query = query
             .whereIn("matches.status", UPCOMING)
@@ -562,7 +535,7 @@ const matchController = {
             .andWhere("matches.start_time", "<=", next24Hours)
             .orderBy("matches.start_time", "asc");
           break;
-  
+
         case "popular":
           query = query
             .whereNotIn("matches.status", EXCLUDE)
@@ -570,14 +543,14 @@ const matchController = {
             .orderBy("total_prize_pool", "desc")
             .orderBy("matches.start_time", "asc");
           break;
-  
+
         default:
           return apiResponse.ErrorResponse(res, MATCH.invalidCategory);
       }
-  
+
       // Fetch matches
       let matches = await query;
-  
+
       // =========================
       // Keep ONLY matches whose BOTH teams have players in DB
       // =========================
@@ -585,58 +558,58 @@ const matchController = {
         const teamIds = [
           ...new Set(matches.flatMap((m) => [m.team1_id, m.team2_id])),
         ];
-  
+
         // Which teams have at least 1 player linked?
         const teamsWithPlayers = await knex("player_teams")
           .select("team_id")
           .whereIn("team_id", teamIds)
           .groupBy("team_id")
           .pluck("team_id");
-  
+
         const teamHasPlayers = new Set(teamsWithPlayers);
-  
+
         matches = matches.filter(
           (m) => teamHasPlayers.has(m.team1_id) && teamHasPlayers.has(m.team2_id)
         );
       }
-  
+
       // Early exit if nothing left after filtering
       if (matches.length === 0) {
         return apiResponse.successResponseWithData(res, SUCCESS.dataFound, []);
       }
-  
+
       // =========================
       // Top Players (by points) per match
       // =========================
       const filteredMatchIds = matches.map((m) => m.id);
-  
+
       // Top by points
       const topPlayersRows =
         filteredMatchIds.length === 0
           ? []
           : await knex("players")
-              .select(
-                "players.id",
-                "players.name",
-                "players.points",
-                "players.credits",
-                "matches.id as match_id"
-              )
-              .leftJoin("player_teams", "players.id", "player_teams.player_id")
-              .leftJoin("teams", "player_teams.team_id", "teams.id")
-              .leftJoin("matches", function () {
-                this.on(function () {
-                  this.on("teams.id", "=", "matches.team1_id").orOn(
-                    "teams.id",
-                    "=",
-                    "matches.team2_id"
-                  );
-                });
-              })
-              .whereIn("matches.id", filteredMatchIds)
-              .orderBy("matches.id", "asc")
-              .orderBy("players.points", "desc");
-  
+            .select(
+              "players.id",
+              "players.name",
+              "players.points",
+              "players.credits",
+              "matches.id as match_id"
+            )
+            .leftJoin("player_teams", "players.id", "player_teams.player_id")
+            .leftJoin("teams", "player_teams.team_id", "teams.id")
+            .leftJoin("matches", function () {
+              this.on(function () {
+                this.on("teams.id", "=", "matches.team1_id").orOn(
+                  "teams.id",
+                  "=",
+                  "matches.team2_id"
+                );
+              });
+            })
+            .whereIn("matches.id", filteredMatchIds)
+            .orderBy("matches.id", "asc")
+            .orderBy("players.points", "desc");
+
       const topPlayersByMatch = {};
       for (const row of topPlayersRows) {
         if (!row.match_id) continue;
@@ -649,32 +622,32 @@ const matchController = {
           };
         }
       }
-  
+
       // Fallback player per match (any player if points missing everywhere)
       const fallbackRows =
         filteredMatchIds.length === 0
           ? []
           : await knex("players")
-              .select(
-                "players.id",
-                "players.name",
-                "matches.id as match_id"
-              )
-              .leftJoin("player_teams", "players.id", "player_teams.player_id")
-              .leftJoin("teams", "player_teams.team_id", "teams.id")
-              .leftJoin("matches", function () {
-                this.on(function () {
-                  this.on("teams.id", "=", "matches.team1_id").orOn(
-                    "teams.id",
-                    "=",
-                    "matches.team2_id"
-                  );
-                });
-              })
-              .whereIn("matches.id", filteredMatchIds)
-              .orderBy("matches.id", "asc")
-              .orderBy("players.name", "asc");
-  
+            .select(
+              "players.id",
+              "players.name",
+              "matches.id as match_id"
+            )
+            .leftJoin("player_teams", "players.id", "player_teams.player_id")
+            .leftJoin("teams", "player_teams.team_id", "teams.id")
+            .leftJoin("matches", function () {
+              this.on(function () {
+                this.on("teams.id", "=", "matches.team1_id").orOn(
+                  "teams.id",
+                  "=",
+                  "matches.team2_id"
+                );
+              });
+            })
+            .whereIn("matches.id", filteredMatchIds)
+            .orderBy("matches.id", "asc")
+            .orderBy("players.name", "asc");
+
       const fallbackByMatch = {};
       for (const row of fallbackRows) {
         if (!row.match_id) continue;
@@ -686,17 +659,17 @@ const matchController = {
           };
         }
       }
-  
+
       // =========================
       // Compose final payload
       // =========================
       const liveSet = new Set(LIVE.map((s) => s.toLowerCase()));
       const matchesWithTimeAgo = matches.map((match) => {
         const { total_prize_pool, ...rest } = match;
-  
+
         const topPlayer =
           topPlayersByMatch[match.id] || fallbackByMatch[match.id] || null;
-  
+
         return {
           ...rest,
           time_ago: moment(match.start_time).fromNow(),
@@ -705,28 +678,28 @@ const matchController = {
           islive: liveSet.has(String(match.status || "").toLowerCase()),
         };
       });
-  
+
       // Notifications
       let matchesWithNotification = matchesWithTimeAgo;
       if (req.user && req.user.id) {
         const userId = req.user.id;
         const matchIds = matchesWithTimeAgo.map((m) => m.id);
-  
+
         let notificationsMap = new Map();
         if (matchIds.length > 0) {
           const notifications = await knex("notifications")
             .whereIn("match_id", matchIds)
             .andWhere({ user_id: userId, status: true });
-  
+
           notificationsMap = new Map(notifications.map((n) => [n.match_id, true]));
         }
-  
+
         matchesWithNotification = matchesWithTimeAgo.map((match) => ({
           ...match,
           is_match_notification: !!notificationsMap.get(match.id),
         }));
       }
-  
+
       // i18n
       const { getLanguage } = require("../../utils/responseMsg");
       const { translateTo } = require("../../utils/google");
@@ -734,7 +707,7 @@ const matchController = {
         getLanguage().toLowerCase() === "hn"
           ? "hi"
           : getLanguage().toLowerCase();
-  
+
       const translated = await Promise.all(
         matchesWithNotification.map(async (match) => {
           const translatedName = await translateTo(match.tournament_name, lang);
@@ -744,7 +717,7 @@ const matchController = {
           };
         })
       );
-  
+
       return apiResponse.successResponseWithData(
         res,
         SUCCESS.dataFound,
@@ -754,7 +727,8 @@ const matchController = {
       console.error(error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
-  },  
+  },
+
   async getLiveMatches(req, res) {
     try {
       const matches = await knex("matches")
@@ -819,7 +793,7 @@ const matchController = {
   async getMatchDetails(req, res) {
     try {
       const { id } = req.params;
-   
+
 
       const match = await knex("matches")
         .select(
@@ -1582,10 +1556,10 @@ const matchController = {
         .select("tournaments.id", "tournaments.metadata")
         .where("tournaments.id", match.tournament_id)
         .first();
-        
-        const metadata = typeof tournament.metadata === "string" 
-  ? JSON.parse(tournament.metadata) 
-  : tournament.metadata;
+
+      const metadata = typeof tournament.metadata === "string"
+        ? JSON.parse(tournament.metadata)
+        : tournament.metadata;
 
 
 
@@ -1609,8 +1583,8 @@ const matchController = {
         .leftJoin("player_teams", "players.id", "player_teams.player_id")
         .leftJoin("teams", "player_teams.team_id", "teams.id")
         .whereIn("player_teams.team_id", [match.team1_id, match.team2_id])
-  .andWhere("player_teams.season_id", seasonId) // This is CRITICAL
-  .groupBy("players.id", "teams.id") // Add grouping to prevent duplicates //
+        .andWhere("player_teams.season_id", seasonId) // This is CRITICAL
+        .groupBy("players.id", "teams.id") // Add grouping to prevent duplicates //
         .orderBy(["teams.name", "players.name"]);
 
       const totalTeams = await knex("fantasy_teams")
@@ -1672,34 +1646,34 @@ const matchController = {
       };
       const getValidCredits = (credits) => {
         if (credits === null || credits === undefined) return "6.0";
-        
+
         const creditValue = parseFloat(credits);
-        
+
         // Check for invalid values (0, 0.0, NaN, or negative)
         if (isNaN(creditValue) || creditValue <= 0) return "6.0";
-        
+
         return credits;
       };
       const getValidSelectedByPercentage = (percentage) => {
         if (percentage === null || percentage === undefined) return "0.00";
-        
+
         const percentageValue = parseFloat(percentage);
-        
+
         // Check for invalid values (NaN or negative)
         if (isNaN(percentageValue) || percentageValue < 0) return "0.00";
-        
+
         return percentage;
       };
-  
+
       // Helper function to get valid points with fallback
       const getValidPoints = (points) => {
         if (points === null || points === undefined) return 10;
-        
+
         const pointsValue = parseInt(points);
-        
+
         // Check for invalid values (NaN or negative)
         if (isNaN(pointsValue) || pointsValue < 0) return 10;
-        
+
         return points;
       };
 
