@@ -132,4 +132,9 @@ const startServer = async () => {
   }
 };
 
-startServer();
+// Export app for testing
+module.exports = app;
+
+if (require.main === module) {
+  startServer();
+}

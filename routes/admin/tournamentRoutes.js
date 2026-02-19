@@ -6,12 +6,12 @@ const upload = require('../../middleware/uploads');
 
 // Tournament Management Routes
 router.post('/test', tournamentsController.testTournaments);
-router.post('/', adminAuth, tournamentsController.getAllTournaments);
+router.post('/getAllTournaments', adminAuth, tournamentsController.getAllTournaments);
 router.get('/:id', adminAuth, tournamentsController.getTournamentById);
 router.post('/sync', tournamentsController.syncTournaments);
-router.post('/', adminAuth, tournamentsController.createTournament);
+router.post('/createTournament', adminAuth, tournamentsController.createTournament);
 router.put('/:id', adminAuth, tournamentsController.updateTournament);
-router.post("/:id", adminAuth,tournamentsController.toggleTournamentStatus)
+router.post("/:id", adminAuth, tournamentsController.toggleTournamentStatus)
 router.delete('/:id', adminAuth, tournamentsController.deleteTournament);
 
 // Tournament Teams and Matches Routes

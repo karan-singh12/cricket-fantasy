@@ -16,7 +16,6 @@ const SportMonksController = {
   async getLeagues(req, res) {
     try {
       const include = "season";
-      console.log('yaha aya h')
       const response = await sportmonksService.getLeagues(include);
       if (!response?.data?.length) {
         return apiResponse.successResponseWithData(
@@ -2105,8 +2104,49 @@ const SportMonksController = {
       console.error("Error in completeContestManually:", error);
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
-  }
+  },
 
+  async randomizePlayerStats(req, res) {
+    try {
+      const players = await db("players").select("id");
+
+      if (!players.length) {
+        return apiResponse.successResponseWithData(
+          res,
+          SPORTMONKS.noPlayersFound,
+          { totalPlayers: 0 }
+        );
+      }
+
+      const creditOptions = [7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0];
+      const updateData = players.map((p) => {
+        const randomCredits =
+          creditOptions[Math.floor(Math.random() * creditOptions.length)];
+        const randomPoints = Math.floor(Math.random() * 101); // 0 to 100
+
+        return db("players")
+          .where({ id: p.id })
+          .update({
+            credits: randomCredits,
+            points: randomPoints,
+            updated_at: new Date(),
+          });
+      });
+
+      await Promise.all(updateData);
+
+      return apiResponse.successResponseWithData(
+        res,
+        "Player stats randomized successfully",
+        {
+          totalPlayers: players.length,
+        }
+      );
+    } catch (error) {
+      console.error("Error in randomizePlayerStats:", error);
+      return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
+    }
+  },
 };
 
 module.exports = SportMonksController;

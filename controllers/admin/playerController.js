@@ -1,4 +1,4 @@
-const {knex:db} = require('../../config/database');
+const { knex: db } = require('../../config/database');
 const apiResponse = require('../../utils/apiResponse');
 const { slugGenrator } = require('../../utils/functions');
 const { USER, ERROR, SUCCESS } = require('../../utils/responseMsg');
@@ -30,7 +30,7 @@ const playerController = {
                 date_of_birth
             } = req.body;
 
-        
+
 
             // Validate team exists
             const team = await db('teams').where('id', team_id).first();
@@ -182,10 +182,10 @@ const playerController = {
                     balls_faced,
                     fours,
                     sixes,
-                    wickets_taken,
+                    wickets: wickets_taken,
                     overs_bowled,
                     runs_conceded,
-                    catches_taken,
+                    catches: catches_taken,
                     stumpings,
                     run_outs,
                     fantasy_points: fantasyPoints
@@ -280,7 +280,7 @@ const playerController = {
                         credits: parseFloat((Math.random() * (11.0 - 7.0) + 7.0).toFixed(1)),
                         is_played_last_match: Math.random() < 0.5,
                         selected_by_percentage: parseFloat((Math.random() * 100).toFixed(2)),
-                        updated_at:  db.fn.now()
+                        updated_at: db.fn.now()
                     });
             }
 

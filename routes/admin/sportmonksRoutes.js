@@ -47,6 +47,7 @@ router.get("/syncAllTournamentData2", auth, fxn.syncAllTournamentData2);
 router.get("/syncAllTournamentTeams", auth, fxn.syncAllTournamentTeams);
 
 router.post("/completeContest/:contestId", auth, fxn.completeContestManually);
+router.post("/randomizePlayerStats", auth, fxn.randomizePlayerStats);
 
 
 module.exports = router;

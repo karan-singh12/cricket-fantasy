@@ -129,9 +129,9 @@ const appDownload = {
         );
       }
 
-      const filePath = path.join( "public", file.file_path);
+      const downloadUrl = `${process.env.BACKEND_URL || config.backendUrl || "https://mybest11bd.com"}/public/${file.file_path}`;
 
-      return res.status(200).json({path :filePath});
+      return res.status(200).json({ path: downloadUrl });
 
     } catch (error) {
       console.error("User Download APK error:", error);
@@ -186,7 +186,7 @@ const appDownload = {
       if (!latest) {
         return apiResponse.ErrorResponse(res, "No app found for this platform");
       }
-      
+
 
       const forceUpdate =
         compareVersions(currentVersion, latest.current_version) < 0;
@@ -199,9 +199,8 @@ const appDownload = {
       // Prepare download URL
       let download_url = "";
       if (platform === "android") {
-        download_url = `${
-          process.env.BACKEND_URL || "https://mybest11bd.com"
-        }/api/admin/app/user/download/latest`;
+        download_url = `${process.env.BACKEND_URL || config.backendUrl || "https://mybest11bd.com"
+          }/public/${latest.file_path}`;
       } else if (platform === "ios") {
         download_url = latest.ios_app_store_link || "";
       }
@@ -221,7 +220,7 @@ const appDownload = {
         optionalUpdate,
         latestVersion: latest.current_version,
         previousVersion: latest.previous_version,
-        download_url :"https://mybest11bd.com",
+        download_url: download_url,
       });
     } catch (error) {
       console.error("Force update check error:", error);

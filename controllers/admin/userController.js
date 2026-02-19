@@ -43,7 +43,7 @@ const userController = {
           dob,
           metadata,
           status: 1,
-          isBot: isBot,
+          is_bot: false, // Defaulting to false as this is public addUser
           created_at: db.fn.now(),
           updated_at: db.fn.now(),
         })
@@ -190,91 +190,91 @@ const userController = {
     try {
       const { id, imagePath, ...updateFields } = req.body;
       console.log(req.body);
-  
+
       updateFields.updated_at = db.fn.now();
-  
+
       if (req.file) {
         updateFields.image_url = req.file.path.replace(/\\/g, "/");
       }
-  
+
       const currentUser = await db("users").where({ id }).first();
       if (!currentUser) {
         return apiResponse.ErrorResponse(res, USER.userNotFound);
       }
-  
+
       if (updateFields.email && updateFields.email !== currentUser.email) {
         const emailExists = await db("users")
           .where("email", updateFields.email)
           .whereNot("id", id)
           .first();
-  
+
         if (emailExists) {
           return apiResponse.ErrorResponse(res, ADMIN.emailExists);
         }
       }
-  
+
       // Check if phone is being updated and already exists (including deleted users)
       if (updateFields.phone && updateFields.phone !== currentUser.phone) {
         const phoneExists = await db("users")
           .where("phone", updateFields.phone)
           .whereNot("id", id)
           .first();
-  
+
         if (phoneExists) {
           return apiResponse.ErrorResponse(res, USER.phoneNumberExists);
         }
       }
-  
+
       let walletUpdated = false;
       let referralBonusUpdated = false;
       let newBalance = null;
       let newBonus = null;
-  
+
       // Wallet update
       if (updateFields.wallet_balance !== undefined) {
         newBalance = Number(updateFields.wallet_balance);
-  
+
         await db("users")
           .where({ id })
           .update({ wallet_balance: newBalance, updated_at: db.fn.now() });
-  
+
         await db("wallet")
           .where({ user_id: id })
           .update({ balance: newBalance, updated_at: db.fn.now() });
-  
+
         walletUpdated = true;
-  
+
         delete updateFields.wallet_balance;
       }
-  
+
       // Referral bonus update
       if (updateFields.referral_bonus !== undefined) {
         newBonus = Number(updateFields.referral_bonus);
-  
+
         await db("users")
           .where({ id })
           .update({ referral_bonus: newBonus, updated_at: db.fn.now() });
-  
+
         referralBonusUpdated = true;
-  
+
         delete updateFields.referral_bonus;
       }
-  
+
       // Other fields update
       const [updated] = await db("users")
         .where({ id })
         .update(updateFields)
         .returning("*");
-  
+
       if (!updated) {
         return apiResponse.ErrorResponse(res, USER.userNotFound);
       }
-  
+
       // Send notifications
       if (walletUpdated) {
         const title = "Wallet Updated by Admin";
         const content = `Your wallet balance has been updated to ৳${newBalance}`;
-  
+
         await db("notifications").insert({
           user_id: id,
           title,
@@ -284,11 +284,11 @@ const userController = {
           created_at: db.fn.now(),
         });
       }
-  
+
       if (referralBonusUpdated) {
         const title = "Referral Bonus Updated";
         const content = `Your referral bonus has been updated to ৳${newBonus}`;
-  
+
         await db("notifications").insert({
           user_id: id,
           title,
@@ -298,7 +298,7 @@ const userController = {
           created_at: db.fn.now(),
         });
       }
-  
+
       return apiResponse.successResponseWithData(
         res,
         USER.userUpdated,
@@ -309,7 +309,7 @@ const userController = {
       return apiResponse.ErrorResponse(res, ERROR.somethingWrong);
     }
   },
-  
+
 
   async changeStatus(req, res) {
     try {
