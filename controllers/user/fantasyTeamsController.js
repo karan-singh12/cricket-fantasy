@@ -408,7 +408,7 @@ const contestController = {
             }
           }
         }
-      } catch (_e) {}
+      } catch (_e) { }
 
       // Get teams with player data (season-scoped to prevent duplicates)
       const teams = await db("fantasy_teams as ft")
@@ -999,9 +999,9 @@ const contestController = {
           const vice_captain_percentage =
             totalTeamsCount > 0
               ? (
-                  (capCounts.vice_captain_count / totalTeamsCount) *
-                  100
-                ).toFixed(2)
+                (capCounts.vice_captain_count / totalTeamsCount) *
+                100
+              ).toFixed(2)
               : "0.00";
           if (!acc[row.fantasy_team_id]) acc[row.fantasy_team_id] = [];
           acc[row.fantasy_team_id].push({
@@ -1093,8 +1093,8 @@ const contestController = {
             winPercentage:
               contestsPlayed > 0
                 ? Math.round(
-                    (parseInt(stat.contests_won) / contestsPlayed) * 100
-                  )
+                  (parseInt(stat.contests_won) / contestsPlayed) * 100
+                )
                 : 0,
             totalWinnings: parseFloat(stat.total_winnings) || 0,
           },
@@ -1338,7 +1338,7 @@ const contestController = {
         .join("matches as m", "ft.match_id", "m.id")
         .join("teams as t1", "m.team1_id", "t1.id")
         .join("teams as t2", "m.team2_id", "t2.id")
-        .leftJoin("venues as v", "m.venue", "v.venue_id")
+        .leftJoin("venues as v", db.raw("CAST(m.venue AS INTEGER)"), "v.venue_id")
         .leftJoin("countries as c", "v.country_id", "c.country_id")
         .join("tournaments as tour", "m.tournament_id", "tour.id")
         .where("fg.user_id", userId)
@@ -1594,8 +1594,8 @@ const contestController = {
 
         const caseExpr = whenClauses.length
           ? `pt.season_id = (CASE ${whenClauses.join(
-              " "
-            )} ELSE pt.season_id END)`
+            " "
+          )} ELSE pt.season_id END)`
           : "1=1";
 
         const seenKeys = new Set();
@@ -1908,8 +1908,8 @@ const contestController = {
               tossSportMonksId === 98
                 ? match.team1_name
                 : tossSportMonksId === 99
-                ? match.team2_name
-                : "Unknown Team";
+                  ? match.team2_name
+                  : "Unknown Team";
           }
 
           elected = metadata.elected;
@@ -1978,171 +1978,171 @@ const contestController = {
           winner_team,
           contets: shouldIncludeContestTeams
             ? {
-                total: (contestsByMatchId.get(match.id) || []).length,
-                list: (contestsByMatchId.get(match.id) || []).map((contest) => {
-                  const allEntriesInContest = (allContestEntries || []).filter(
-                    (c) => c.contest_id === contest.contest_id
-                  );
+              total: (contestsByMatchId.get(match.id) || []).length,
+              list: (contestsByMatchId.get(match.id) || []).map((contest) => {
+                const allEntriesInContest = (allContestEntries || []).filter(
+                  (c) => c.contest_id === contest.contest_id
+                );
 
-                  // Use official leaderboard data instead of calculated points
-                  const leaderboardWithOfficialData = allEntriesInContest
-                    .map((c) => {
-                      // Find the official leaderboard entry for this team
-                      const officialEntry = allContestEntries.find(
-                        (entry) =>
-                          entry.fantasy_team_id === c.fantasy_team_id &&
-                          entry.contest_id === contest.contest_id
-                      );
+                // Use official leaderboard data instead of calculated points
+                const leaderboardWithOfficialData = allEntriesInContest
+                  .map((c) => {
+                    // Find the official leaderboard entry for this team
+                    const officialEntry = allContestEntries.find(
+                      (entry) =>
+                        entry.fantasy_team_id === c.fantasy_team_id &&
+                        entry.contest_id === contest.contest_id
+                    );
 
-                      return {
-                        ...c,
-                        calculatedPoints: officialEntry
-                          ? Number(officialEntry.totalScore) || 0
-                          : 0,
-                        officialRank: officialEntry
-                          ? Number(officialEntry.leaderboard_rank) || null
-                          : null,
-                      };
-                    })
-                    .sort((a, b) => {
-                      // Sort by official rank if available, otherwise by calculated points
-                      if (a.officialRank !== null && b.officialRank !== null) {
-                        return a.officialRank - b.officialRank;
-                      }
-                      return b.calculatedPoints - a.calculatedPoints;
-                    })
-                    .map((c, index) => {
-                      let playersArr = [];
-                      let team1PlayerCount = 0;
-                      let team2PlayerCount = 0;
+                    return {
+                      ...c,
+                      calculatedPoints: officialEntry
+                        ? Number(officialEntry.totalScore) || 0
+                        : 0,
+                      officialRank: officialEntry
+                        ? Number(officialEntry.leaderboard_rank) || null
+                        : null,
+                    };
+                  })
+                  .sort((a, b) => {
+                    // Sort by official rank if available, otherwise by calculated points
+                    if (a.officialRank !== null && b.officialRank !== null) {
+                      return a.officialRank - b.officialRank;
+                    }
+                    return b.calculatedPoints - a.calculatedPoints;
+                  })
+                  .map((c, index) => {
+                    let playersArr = [];
+                    let team1PlayerCount = 0;
+                    let team2PlayerCount = 0;
 
-                      if (
-                        (isLiveOrStarted || isFinished) &&
-                        playersByTeamId[c.fantasy_team_id]
-                      ) {
-                        playersArr = playersByTeamId[c.fantasy_team_id].map(
-                          (player) => {
-                            // Count players from each team
-                            if (
-                              player.teamId === match.team1_id &&
-                              !player.substitute
-                            ) {
-                              team1PlayerCount++;
-                            } else if (
-                              player.teamId === match.team2_id &&
-                              !player.substitute
-                            ) {
-                              team2PlayerCount++;
-                            }
-
-                            return {
-                              ...player,
-                            };
+                    if (
+                      (isLiveOrStarted || isFinished) &&
+                      playersByTeamId[c.fantasy_team_id]
+                    ) {
+                      playersArr = playersByTeamId[c.fantasy_team_id].map(
+                        (player) => {
+                          // Count players from each team
+                          if (
+                            player.teamId === match.team1_id &&
+                            !player.substitute
+                          ) {
+                            team1PlayerCount++;
+                          } else if (
+                            player.teamId === match.team2_id &&
+                            !player.substitute
+                          ) {
+                            team2PlayerCount++;
                           }
-                        );
-                      }
 
-                      // Use official rank if available, otherwise use calculated rank
-                      const rank =
-                        c.officialRank !== null ? c.officialRank : index + 1;
-                      const points = c.calculatedPoints;
+                          return {
+                            ...player,
+                          };
+                        }
+                      );
+                    }
 
-                      return {
-                        fantasy_team_id: c.fantasy_team_id,
-                        team_label: c.team_label,
-                        fantasy_team_name: c.fantasy_team_name,
-                        rank: rank,
-                        points: points,
-                        username: c.username,
-                        profile_image: c.profile_image
-                          ? `${config.baseURL}/${c.profile_image}`
-                          : null,
-                        // Add the requested team information
-                        team1_short_name: match.team1_short_name,
-                        team2_short_name: match.team2_short_name,
-                        team1_player_count: team1PlayerCount,
-                        team2_player_count: team2PlayerCount,
-                        ...(isLiveOrStarted || isFinished
-                          ? { players: playersArr }
-                          : {}),
-                      };
-                    });
+                    // Use official rank if available, otherwise use calculated rank
+                    const rank =
+                      c.officialRank !== null ? c.officialRank : index + 1;
+                    const points = c.calculatedPoints;
 
-                  // Find current user's team rank from the leaderboard
-                  const myTeamRank =
+                    return {
+                      fantasy_team_id: c.fantasy_team_id,
+                      team_label: c.team_label,
+                      fantasy_team_name: c.fantasy_team_name,
+                      rank: rank,
+                      points: points,
+                      username: c.username,
+                      profile_image: c.profile_image
+                        ? `${config.baseURL}/${c.profile_image}`
+                        : null,
+                      // Add the requested team information
+                      team1_short_name: match.team1_short_name,
+                      team2_short_name: match.team2_short_name,
+                      team1_player_count: team1PlayerCount,
+                      team2_player_count: team2PlayerCount,
+                      ...(isLiveOrStarted || isFinished
+                        ? { players: playersArr }
+                        : {}),
+                    };
+                  });
+
+                // Find current user's team rank from the leaderboard
+                const myTeamRank =
+                  leaderboardWithOfficialData.find(
+                    (l) => l.fantasy_team_id === contest.fantasy_team_id
+                  )?.rank || null;
+
+                return {
+                  contest_id: contest.contest_id,
+                  team_label: contest.team_label,
+                  fantasy_team_id: contest.fantasy_team_id,
+                  fantasy_team_name: contest.fantasy_team_name,
+                  points:
                     leaderboardWithOfficialData.find(
                       (l) => l.fantasy_team_id === contest.fantasy_team_id
-                    )?.rank || null;
-
-                  return {
-                    contest_id: contest.contest_id,
-                    team_label: contest.team_label,
-                    fantasy_team_id: contest.fantasy_team_id,
-                    fantasy_team_name: contest.fantasy_team_name,
-                    points:
-                      leaderboardWithOfficialData.find(
-                        (l) => l.fantasy_team_id === contest.fantasy_team_id
-                      )?.points || 0, // Use official points
-                    filled_spots: contest.filled_spots,
-                    username: contest.username,
-                    profile_image: contest.profile_image,
-                    rank: myTeamRank,
-                    leaderboard: leaderboardWithOfficialData,
-                  };
-                }),
-                total_participants: (() => {
-                  const contests = contestsByMatchId.get(match.id) || [];
-                  const uniqueContestIds = new Set();
-                  let totalParticipants = 0;
-                  for (const contest of contests) {
-                    if (
-                      contest.contest_id &&
-                      !uniqueContestIds.has(contest.contest_id)
-                    ) {
-                      uniqueContestIds.add(contest.contest_id);
-                      totalParticipants += contest.filled_spots || 0;
-                    }
+                    )?.points || 0, // Use official points
+                  filled_spots: contest.filled_spots,
+                  username: contest.username,
+                  profile_image: contest.profile_image,
+                  rank: myTeamRank,
+                  leaderboard: leaderboardWithOfficialData,
+                };
+              }),
+              total_participants: (() => {
+                const contests = contestsByMatchId.get(match.id) || [];
+                const uniqueContestIds = new Set();
+                let totalParticipants = 0;
+                for (const contest of contests) {
+                  if (
+                    contest.contest_id &&
+                    !uniqueContestIds.has(contest.contest_id)
+                  ) {
+                    uniqueContestIds.add(contest.contest_id);
+                    totalParticipants += contest.filled_spots || 0;
                   }
-                  return totalParticipants;
-                })(),
-              }
+                }
+                return totalParticipants;
+              })(),
+            }
             : undefined,
           teams: shouldIncludeContestTeams
             ? Array.from(usedTeamsByMatchId.get(match.id) || []).map(
-                ([_, team]) => {
-                  const players = playersByTeamId[team.id] || [];
+              ([_, team]) => {
+                const players = playersByTeamId[team.id] || [];
 
-                  // Find official points from leaderboard for this team
-                  const officialPointsEntry = allContestEntries.find(
-                    (entry) => entry.fantasy_team_id === team.id
-                  );
-                  const totalPoints = officialPointsEntry
-                    ? Number(officialPointsEntry.totalScore) || 0
-                    : teamTotals[team.id] || 0;
+                // Find official points from leaderboard for this team
+                const officialPointsEntry = allContestEntries.find(
+                  (entry) => entry.fantasy_team_id === team.id
+                );
+                const totalPoints = officialPointsEntry
+                  ? Number(officialPointsEntry.totalScore) || 0
+                  : teamTotals[team.id] || 0;
 
-                  return {
-                    backup_players: [],
-                    fantasy_team_id: team.id,
-                    fantasy_team_name: team.name,
-                    match_id: match.id,
-                    players: players,
-                    team1_id: match.team1_id,
-                    team1_image: match.team1_logo_url,
-                    team1_player_count: players.filter(
-                      (p) => p.teamId === match.team1_id && !p.substitute
-                    ).length,
-                    team1_short_name: match.team1_short_name,
-                    team2_id: match.team2_id,
-                    team2_image: match.team2_logo_url,
-                    team2_player_count: players.filter(
-                      (p) => p.teamId === match.team2_id && !p.substitute
-                    ).length,
-                    team2_short_name: match.team2_short_name,
-                    team_status: team.team_status,
-                    total_points: Number(totalPoints.toFixed(2)),
-                  };
-                }
-              )
+                return {
+                  backup_players: [],
+                  fantasy_team_id: team.id,
+                  fantasy_team_name: team.name,
+                  match_id: match.id,
+                  players: players,
+                  team1_id: match.team1_id,
+                  team1_image: match.team1_logo_url,
+                  team1_player_count: players.filter(
+                    (p) => p.teamId === match.team1_id && !p.substitute
+                  ).length,
+                  team1_short_name: match.team1_short_name,
+                  team2_id: match.team2_id,
+                  team2_image: match.team2_logo_url,
+                  team2_player_count: players.filter(
+                    (p) => p.teamId === match.team2_id && !p.substitute
+                  ).length,
+                  team2_short_name: match.team2_short_name,
+                  team_status: team.team_status,
+                  total_points: Number(totalPoints.toFixed(2)),
+                };
+              }
+            )
             : undefined,
         };
       });
@@ -2321,9 +2321,8 @@ const contestController = {
         .first();
 
       let notifTitle = "Match Reminder";
-      let notifContent = `Your match ${
-        match.match_number || match_id
-      } starts at ${startTimeFormatted}`;
+      let notifContent = `Your match ${match.match_number || match_id
+        } starts at ${startTimeFormatted}`;
 
       if (template) {
         notifTitle = template.title || notifTitle;
