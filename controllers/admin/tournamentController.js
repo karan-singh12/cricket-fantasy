@@ -18,7 +18,7 @@ const tournamentController = {
         status = [],
       } = req.body;
 
-  
+
 
       pageNumber = Math.max(0, pageNumber - 1);
 
@@ -42,10 +42,15 @@ const tournamentController = {
         .limit(pageSize)
         .offset(pageSize * pageNumber);
 
+      const formattedResult = result.map((t) => ({
+        ...t,
+        status: !!t.status,
+      }));
+
       return res.json({
         success: true,
         data: {
-          result,
+          result: formattedResult,
           totalRecords: parseInt(totalRecords.count),
           pageNumber: pageNumber + 1,
           pageSize,
@@ -77,7 +82,10 @@ const tournamentController = {
 
       res.json({
         success: true,
-        data: tournament,
+        data: {
+          ...tournament,
+          status: !!tournament.status,
+        },
       });
     } catch (error) {
       res.status(500).json({
@@ -102,7 +110,10 @@ const tournamentController = {
       res.status(201).json({
         success: true,
         message: "Tournament created successfully",
-        data: tournament,
+        data: {
+          ...tournament,
+          status: !!tournament.status,
+        },
       });
     } catch (error) {
       res.status(500).json({
@@ -134,7 +145,10 @@ const tournamentController = {
       res.json({
         success: true,
         message: "Tournament updated successfully",
-        data: tournament,
+        data: {
+          ...tournament,
+          status: !!tournament.status,
+        },
       });
     } catch (error) {
       res.status(500).json({
@@ -185,7 +199,7 @@ const tournamentController = {
           message: "Tournament not found",
         });
       }
-     
+
 
       const metadata = tournament.metadata;
 
@@ -228,7 +242,10 @@ const tournamentController = {
       res.json({
         success: true,
         data: {
-          tournament: tournament,
+          tournament: {
+            ...tournament,
+            status: !!tournament.status,
+          },
           teams: teams,
           api_metadata: metadata,
         },
@@ -278,11 +295,14 @@ const tournamentController = {
         .where("matches.tournament_id", req.params.id)
         .orderBy("matches.start_time", "asc");
 
-    
+
       res.json({
         success: true,
         data: {
-          tournament: tournament,
+          tournament: {
+            ...tournament,
+            status: !!tournament.status,
+          },
           matches: matches,
           api_metadata: metadata,
         },
@@ -509,7 +529,7 @@ const tournamentController = {
       }
 
       const newStatus = !tournament.status;
-     
+
       const [updatedTournament] = await knex("tournaments")
         .where("id", req.params.id)
         .update({
@@ -690,7 +710,10 @@ const tournamentController = {
         success: true,
         message: "Tournament teams and players synchronized successfully",
         data: {
-          tournament: tournament,
+          tournament: {
+            ...tournament,
+            status: !!tournament.status,
+          },
           teams: savedTeams,
           players: savedPlayers,
         },
@@ -1207,8 +1230,8 @@ const tournamentController = {
                         matchData.localteam.winner === "True"
                           ? savedTeam1.id
                           : matchData.visitorteam.winner === "True"
-                          ? savedTeam2.id
-                          : null,
+                            ? savedTeam2.id
+                            : null,
                       venue: venueInfo,
                       city: cityInfo,
                       country: countryInfo,
@@ -1282,7 +1305,10 @@ const tournamentController = {
         success: true,
         message: "Tournament matches synchronized successfully",
         data: {
-          tournament: tournament,
+          tournament: {
+            ...tournament,
+            status: !!tournament.status,
+          },
           matches: savedMatches,
         },
       });
