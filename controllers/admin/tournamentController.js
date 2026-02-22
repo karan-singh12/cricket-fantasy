@@ -17,6 +17,7 @@ const tournamentController = {
         sortOrder = "asc",
         status = [],
       } = req.body;
+      console.log(req.body);
 
 
 
@@ -35,12 +36,14 @@ const tournamentController = {
       }
 
       const totalRecords = await query.clone().count().first();
+      console.log(totalRecords);
 
       const result = await query
         .select("id", "name", "status", "start_date")
         .orderBy(sortBy, sortOrder)
         .limit(pageSize)
         .offset(pageSize * pageNumber);
+      console.log(result);
 
       const formattedResult = result.map((t) => ({
         ...t,
