@@ -6,7 +6,7 @@ const upload = require('../../middleware/uploads');
 
 // Tournament Management Routes
 router.post('/test', tournamentsController.testTournaments);
-router.post('/getAllTournaments', adminAuth, tournamentsController.getAllTournaments);
+router.post('/', adminAuth, tournamentsController.getAllTournaments);
 router.get('/:id', adminAuth, tournamentsController.getTournamentById);
 router.post('/sync', tournamentsController.syncTournaments);
 router.post('/createTournament', adminAuth, tournamentsController.createTournament);
